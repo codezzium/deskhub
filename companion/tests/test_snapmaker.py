@@ -287,6 +287,9 @@ def connects_settle(secs=0.5):
 Fake.sessions.clear()
 check(wait_for(lambda: len(Fake.connects) == 2 and svc.message()["printers"][0]["online"]
                and Fake.sessions == {TOKEN}), f"reconnect after a dropped session: {Fake.connects}")
+# The worker logs "connected" after the first good status of the new session, and that ends the
+# outage; a prompt shown before then would be the same outage and get no hint of its own.
+check(wait_for(lambda: logs[-1:] == ["printer A350: connected"]), f"outage over: {logs}")
 # The printer forgot the token and puts up a prompt for it: tapping Yes brings it back.
 logs.clear()
 Fake.approve_after = None

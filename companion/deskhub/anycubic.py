@@ -14,7 +14,8 @@ The login changes when the printer restarts, so a lost connection runs the hands
 Reports arrive on anycubic/anycubicCloud/v1/printer/public/<modelId>/<deviceId>/<type>/report;
 queries go to .../web/printer/<modelId>/<deviceId>/<type>. Worked out from the community
 projects anycubic_ha_local, anycubic-lan, kobra-connect and Rinkhals' MQTT notes; nothing here
-comes from Anycubic. Older Kobra 2 firmware uses another handshake and is not supported.
+comes from Anycubic. The Kobra 2 series has no LAN Mode on stock firmware (the Pro, Plus and
+Max only talk to Anycubic's cloud; the Kobra 2 and Neo have no network), so it isn't covered.
 """
 import base64
 import hashlib
@@ -185,8 +186,8 @@ def handshake(host: str, port: int = DEFAULT_PORT, timeout: float = 6) -> tuple[
                                 "(Settings > Network > LAN Mode).")
         token, ctrl_url = info.get("token"), info.get("ctrlInfoUrl")
         if not (isinstance(token, str) and len(token) >= 32 and isinstance(ctrl_url, str) and info.get("modelId")):
-            raise AnycubicError("This printer's LAN Mode uses an older handshake (Kobra 2 generation) that is "
-                                "not supported. Updating the printer's firmware may help.")
+            raise AnycubicError("This printer answered with a LAN handshake the companion doesn't know. "
+                                "Updating the printer's firmware may help.")
         # ctrlInfoUrl names the printer's own address; keep its port and path but send the
         # request to the host the user entered.
         try:
@@ -533,8 +534,7 @@ SPEC = BackendSpec(
   with or without ACE Pro. Turn on LAN Mode on the printer: Settings > Network > LAN Mode.
   Note: LAN Mode takes the printer out of the Anycubic cloud and app until you pair it again.
   No password is needed: the companion asks the printer for its login each time it connects.
-  The printer answers on port 18910. Kobra 2 printers use an older LAN handshake and are not
-  supported.""",
+  The printer answers on port 18910. The Kobra 2 series has no LAN Mode and is not supported.""",
     default_port=DEFAULT_PORT,
     default_model="Anycubic",
     probe=probe,

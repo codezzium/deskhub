@@ -22,7 +22,9 @@ _IP = re.compile(r"[\w.\-:]+")
 
 
 def printers_of(doc) -> tomlkit.items.AoT:
-    if "printers" not in doc:
+    # Removing the last printer leaves `printers = []`, an inline array that tables can't be
+    # appended to (the file would no longer parse), so start a fresh [[printers]] list then.
+    if not isinstance(doc.get("printers"), tomlkit.items.AoT) and not doc.get("printers"):
         doc["printers"] = tomlkit.aot()
     return doc["printers"]
 
@@ -216,6 +218,10 @@ def cmd_add_polled(path, spec):
     entry = {"name": "", "type": spec.type, "host": host}
     if port != spec.default_port:
         entry["port"] = port
+    if any(_same(p, entry) for p in printers_of(load(path))):
+        # Before the connection test, which can put a prompt on the printer's screen.
+        print(f"{host} is already configured.")
+        return
     for field in spec.fields:
         value = ask(field.prompt, field.default)
         if not value and field.required:

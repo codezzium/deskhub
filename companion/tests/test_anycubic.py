@@ -485,7 +485,7 @@ r = ac.probe({"host": "127.0.0.1", "port": HTTP_PORT}, None)
 check(not r.ok and "cloud mode" in r.message, f"probe cloud mode: {r}")
 Fake.mode = "old"
 r = ac.probe({"host": "127.0.0.1", "port": HTTP_PORT}, None)
-check(not r.ok and "Kobra 2" in r.message, f"probe old firmware: {r}")
+check(not r.ok and "handshake" in r.message, f"probe unknown handshake: {r}")
 Fake.mode = "lan"
 r = ac.probe({"host": "127.0.0.1", "port": 1}, None, timeout=1)
 check(not r.ok and "LAN Mode" in r.message, f"probe unreachable: {r}")
