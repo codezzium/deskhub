@@ -117,24 +117,91 @@ def _episode_line(show: str, season, episode) -> str:
 
 # ---- Plex -------------------------------------------------------------------
 
-def _plex_get(url: str, token: str, path: str, params: dict | None = None, raw: bool = False):
+def _plex_get(url: str, token: str, path: str, params: dict | None = None, raw: bool = False,
+              tls_name: str = ""):
+    """A request to the server. With tls_name, connect by IP but check the certificate
+    against the server's own *.plex.direct name (Plex servers set to require secure
+    connections refuse plain HTTP, and their certificate never names the IP)."""
     import httpx
 
-    r = httpx.get(url.rstrip("/") + path, params=params, timeout=8,
-                  headers={"X-Plex-Token": token, "Accept": "application/json",
-                           "X-Plex-Product": PRODUCT, "X-Plex-Client-Identifier": client_id()})
+    with httpx.Client(timeout=8) as c:
+        req = c.build_request("GET", url.rstrip("/") + path, params=params,
+                              headers={"X-Plex-Token": token, "Accept": "application/json",
+                                       "X-Plex-Product": PRODUCT, "X-Plex-Client-Identifier": client_id()},
+                              extensions={"sni_hostname": tls_name} if tls_name else None)
+        r = c.send(req)
     r.raise_for_status()
     return r.content if raw else r.json()
+
+
+def plex_identity(url: str, get=None) -> tuple[str, str]:
+    """(machine id, scheme) of the Plex server at url. /identity needs no token, so
+    trying HTTPS without checking the certificate sends nothing secret."""
+    import httpx
+    from urllib.parse import urlsplit
+
+    get = get or httpx.get
+    host = urlsplit(url).netloc
+    last = None
+    for scheme in ("http", "https"):
+        try:
+            r = get(f"{scheme}://{host}/identity", timeout=5, verify=scheme == "http",
+                    headers={"Accept": "application/json"})
+            r.raise_for_status()
+            mc = r.json().get("MediaContainer") or {}
+            return mc.get("machineIdentifier", ""), scheme
+        except Exception as e:
+            last = e
+    raise last
+
+
+def plex_connection(url: str, token: str, get=None, identity=plex_identity) -> dict:
+    """Where and how to reach a Plex server from this PC: {"url", "tls_name", "token"}.
+
+    Asks plex.tv for the server's local HTTPS address (its *.plex.direct name, which the
+    certificate is made for) and the server's own access token. Without that, plain
+    HTTP if the server takes it.
+    """
+    import httpx
+    from urllib.parse import urlsplit
+
+    get = get or httpx.get
+    machine, scheme = identity(url)
+    host = urlsplit(url).hostname
+    port = urlsplit(url).port or PLEX_PORT
+    try:
+        r = get(f"{PLEX_TV}/resources", params={"includeHttps": 1, "includeRelay": 0}, timeout=15,
+                headers={"Accept": "application/json", "X-Plex-Token": token, "X-Plex-Product": PRODUCT,
+                         "X-Plex-Client-Identifier": client_id()})
+        r.raise_for_status()
+        resources = r.json()
+    except Exception as e:
+        log.info("plex.tv resources: %s", e)
+        resources = []
+    for res in resources:
+        if res.get("clientIdentifier") != machine:
+            continue
+        for c in res.get("connections") or []:
+            if c.get("protocol") == "https" and c.get("address") == host:
+                name = urlsplit(c.get("uri", "")).hostname or ""
+                if name.endswith(".plex.direct"):
+                    return {"url": f"https://{host}:{c.get('port') or port}", "tls_name": name,
+                            "token": res.get("accessToken") or token}
+    if scheme == "http":
+        return {"url": f"http://{host}:{port}", "tls_name": "", "token": token}
+    raise RuntimeError("the server only takes secure connections, and plex.tv didn't list its "
+                       "secure address for this account")
 
 
 class PlexServer:
     kind = "plex"
 
-    def __init__(self, url: str, token: str, name: str = "Plex", get=_plex_get):
+    def __init__(self, url: str, token: str, name: str = "Plex", tls_name: str = "", get=_plex_get):
         self.url, self.token, self.name, self._get = url.rstrip("/"), token, name, get
+        self.tls_name = tls_name
 
     def sessions(self) -> list[Session]:
-        data = self._get(self.url, self.token, "/status/sessions")
+        data = self._get(self.url, self.token, "/status/sessions", tls_name=self.tls_name)
         out = []
         for m in (data.get("MediaContainer") or {}).get("Metadata") or []:
             kind = m.get("type", "")
@@ -170,7 +237,8 @@ class PlexServer:
 
     def cover(self, s: Session) -> bytes:
         return self._get(self.url, self.token, "/photo/:/transcode",
-                         {"url": s.art_key, "width": ART_SIZE, "height": ART_SIZE, "minSize": 1}, raw=True)
+                         {"url": s.art_key, "width": ART_SIZE, "height": ART_SIZE, "minSize": 1}, raw=True,
+                         tls_name=self.tls_name)
 
     def command(self, s: Session, cmd: str, value: int = 0):
         pass  # display-only, see the module docstring
@@ -360,7 +428,8 @@ def build_servers(entries: list[dict]) -> list:
             log.info("media server %s has no token saved; run: uv run deskhub-setup media", url)
             continue
         name = str(e.get("name") or kind.title())
-        servers.append(PlexServer(url, secret, name) if kind == "plex" else JellyfinServer(url, secret, name))
+        servers.append(PlexServer(url, secret, name, tls_name=str(e.get("tls_name", ""))) if kind == "plex"
+                       else JellyfinServer(url, secret, name))
     return servers
 
 

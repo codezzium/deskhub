@@ -45,8 +45,8 @@ PLEX_SESSIONS = {"MediaContainer": {"size": 2, "Metadata": [
 plex_calls = []
 
 
-def plex_get(url, token, path, params=None, raw=False):
-    plex_calls.append((path, params, token))
+def plex_get(url, token, path, params=None, raw=False, tls_name=""):
+    plex_calls.append((path, params, token, tls_name))
     if token == "bad":
         raise RuntimeError("401 Unauthorized")
     if path == "/status/sessions":
@@ -202,6 +202,55 @@ flaky.poll(now=ms.BACKOFF_S + 1)
 check(len([c for c in plex_calls if c[2] == "bad"]) == n + 1, "asked again after back-off")
 check(len(flaky.sessions) == 3, "the other server still shows")
 
+# ---- reaching a Plex server --------------------------------------------------
+
+
+class Resp:
+    def __init__(self, data, status=200):
+        self.data, self.status_code = data, status
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+    def json(self):
+        return self.data
+
+
+RESOURCES = [
+    {"clientIdentifier": "other", "connections": []},
+    {"clientIdentifier": "m1", "accessToken": "srv-tok", "connections": [
+        {"protocol": "https", "address": "203.0.113.9", "port": 32400,
+         "uri": "https://203-0-113-9.hash.plex.direct:32400", "local": False},
+        {"protocol": "https", "address": "192.168.0.142", "port": 32400,
+         "uri": "https://192-168-0-142.hash.plex.direct:32400", "local": True}]},
+]
+tv = lambda url, **kw: Resp(RESOURCES)
+conn = ms.plex_connection("http://192.168.0.142:32400", "acct", get=tv, identity=lambda u: ("m1", "https"))
+check(conn == {"url": "https://192.168.0.142:32400", "tls_name": "192-168-0-142.hash.plex.direct",
+               "token": "srv-tok"}, f"secure local connection from plex.tv: {conn}")
+down = lambda url, **kw: Resp([], 503)
+conn = ms.plex_connection("http://192.168.0.142:32400", "acct", get=down, identity=lambda u: ("m1", "http"))
+check(conn == {"url": "http://192.168.0.142:32400", "tls_name": "", "token": "acct"}, f"plain HTTP fallback: {conn}")
+try:
+    ms.plex_connection("http://192.168.0.142:32400", "acct", get=down, identity=lambda u: ("m1", "https"))
+    check(False, "secure-only server without plex.tv should fail")
+except RuntimeError as e:
+    check("secure" in str(e), f"says why: {e}")
+
+seen = []
+
+
+def ident_get(url, **kw):
+    seen.append((url, kw.get("verify"), kw.get("headers", {}).get("X-Plex-Token")))
+    if url.startswith("http://"):
+        raise ConnectionResetError("reset")
+    return Resp({"MediaContainer": {"machineIdentifier": "m1"}})
+
+
+check(ms.plex_identity("http://192.168.0.142:32400", get=ident_get) == ("m1", "https"), "identity over HTTPS")
+check(seen[-1] == ("https://192.168.0.142:32400/identity", False, None), f"no token on the unchecked probe: {seen}")
+
 # ---- discovery replies ----------------------------------------------------------
 
 gdm = (b"HTTP/1.0 200 OK\r\nContent-Type: plex/media-server\r\nResource-Identifier: 123\r\n"
@@ -267,8 +316,12 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # a typed Plex address with a pasted token that the server refuses: not saved
     orig_plex = ms.PlexServer.__init__
-    ms.PlexServer.__init__ = lambda self, url, token, name="Plex", get=None: orig_plex(
-        self, url, token, name, get=plex_get)
+    ms.PlexServer.__init__ = lambda self, url, token, name="Plex", tls_name="", get=None: orig_plex(
+        self, url, token, name, tls_name=tls_name, get=plex_get)
+    # plex.tv knows the server's secure address and hands out the server's own token.
+    ms.plex_connection = lambda url, token: (
+        {"url": "http://10.0.0.9:32400", "tls_name": "", "token": token} if token == "bad" else
+        {"url": "https://10.0.0.9:32400", "tls_name": "10-0-0-9.abc.plex.direct", "token": "server-token"})
     answers[:] = ["a", "10.0.0.9", "plex", "n", "bad", ""]
     ms.discover = lambda timeout=2.0: []
     setup_cli.step_media_servers(cfg, ask_first=False)
@@ -276,13 +329,19 @@ with tempfile.TemporaryDirectory() as tmp:
     # same with a good token: saved with the default port
     answers[:] = ["a", "10.0.0.9", "plex", "n", "good", ""]
     setup_cli.step_media_servers(cfg, ask_first=False)
-    urls = [e["url"] for e in setup_cli.media_server_entries(cfg)]
-    check(urls == ["http://192.168.1.6:8096", "http://10.0.0.9:32400"], f"plex added: {urls}")
+    saved = setup_cli.media_server_entries(cfg)
+    check([e["url"] for e in saved] == ["http://192.168.1.6:8096", "https://10.0.0.9:32400"], f"plex added: {saved}")
+    check(saved[1].get("tls_name") == "10-0-0-9.abc.plex.direct", "plex.direct name saved")
+    check(ms.get_secret("https://10.0.0.9:32400") == "server-token", "server's token saved")
+    built = ms.build_servers(saved)
+    check(built[1].tls_name == "10-0-0-9.abc.plex.direct", "companion checks the certificate by name")
+    built[1].sessions()
+    check(plex_calls[-1][3] == "10-0-0-9.abc.plex.direct", "requests carry the name")
 
     # remove the first
     answers[:] = ["r", "1", ""]
     setup_cli.step_media_servers(cfg, ask_first=False)
-    check([e["url"] for e in setup_cli.media_server_entries(cfg)] == ["http://10.0.0.9:32400"], "removed")
+    check([e["url"] for e in setup_cli.media_server_entries(cfg)] == ["https://10.0.0.9:32400"], "removed")
     check(ms.get_secret("http://192.168.1.6:8096") == "", "its key removed too")
 
     # Plex browser sign-in: PIN approved on the second check.

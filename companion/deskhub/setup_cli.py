@@ -441,10 +441,22 @@ def add_media_server(config_path: pathlib.Path, found: list[dict]):
         server = {"type": kind, "name": kind.title(), "url": url.rstrip("/")}
     if server["type"] == "plex":
         print("Plex needs a token. Sign in with your Plex account in the browser, or paste a\n"
-              "token you already have (Plex Web > a media item > Get Info > View XML: X-Plex-Token).")
+              "token you already have (Plex Web > a media item > ... > Get Info > View XML: the new\n"
+              "tab's address ends in X-Plex-Token=<token>).")
         secret = (plex_sign_in() if yes("Sign in with the browser", True)
                   else getpass.getpass("Plex token (hidden): ").strip())
-        client = ms.PlexServer(server["url"], secret, server["name"])
+        if not secret:
+            return
+        try:
+            conn = ms.plex_connection(server["url"], secret)
+        except Exception as e:
+            print(f"Couldn't reach Plex at {server['url']} ({e}); not saved.")
+            return
+        secret = conn["token"]
+        if conn["tls_name"]:
+            print(f"Using a secure connection ({conn['tls_name']}).")
+        server.update(url=conn["url"], tls_name=conn["tls_name"])
+        client = ms.PlexServer(server["url"], secret, server["name"], tls_name=conn["tls_name"])
     else:
         print("Make an API key in Jellyfin: Dashboard > Administration > API Keys > +.\n"
               "It's kept in the Windows credential store, not in config.toml.")
@@ -460,7 +472,10 @@ def add_media_server(config_path: pathlib.Path, found: list[dict]):
         return
     ms.set_secret(server["url"], secret)
     entries = [e for e in media_server_entries(config_path) if e.get("url", "").rstrip("/") != server["url"]]
-    entries.append({"type": server["type"], "name": server["name"], "url": server["url"]})
+    entry = {"type": server["type"], "name": server["name"], "url": server["url"]}
+    if server.get("tls_name"):
+        entry["tls_name"] = server["tls_name"]
+    entries.append(entry)
     save_media_servers(config_path, entries)
     playing = f"; {len(sessions)} playing now" if sessions else ""
     print(f"Connected to {server['name']}{playing}. Saved.")
