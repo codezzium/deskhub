@@ -50,12 +50,16 @@ def renew_signin(claude: str | None) -> bool:
     expired token and writes it back to the credentials file itself; it sends no
     message to Claude. Its output (which names the account) is discarded."""
     if not claude:
+        log.warning("live Claude limits: can't renew the sign-in, `claude` not found on PATH")
         return False
     try:
         r = subprocess.run([claude, "auth", "status"], capture_output=True, timeout=60,
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0)
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as e:
+        log.warning("live Claude limits: `%s auth status` failed (%s)", claude, type(e).__name__)
         return False
+    if r.returncode != 0:
+        log.warning("live Claude limits: `%s auth status` exited %d", claude, r.returncode)
     return r.returncode == 0
 
 
