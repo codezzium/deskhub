@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 
 from PIL import Image
 
-from .media import ART_SIZE, art_frame
+from .media import art_frame
 from .text import ascii_fold
 
 log = logging.getLogger(__name__)
@@ -35,7 +35,10 @@ POLL_ACTIVE_S = 3
 POLL_IDLE_S = 15
 BACKOFF_S = 60
 ART_RETRY_S = 30
+INFO_S = 10 * 60      # version and library sizes change slowly
+POSTER_W, POSTER_H = 128, 192   # the board's server cover, 2:3 like a poster
 TICKS = 10_000_000   # Jellyfin times are in 100 ns ticks
+SERVER_ART_MAGIC = b"ARS1"
 PLEX_PORT = 32400
 JELLYFIN_PORT = 8096
 
@@ -237,11 +240,28 @@ class PlexServer:
 
     def cover(self, s: Session) -> bytes:
         return self._get(self.url, self.token, "/photo/:/transcode",
-                         {"url": s.art_key, "width": ART_SIZE, "height": ART_SIZE, "minSize": 1}, raw=True,
-                         tls_name=self.tls_name)
+                         {"url": s.art_key, "width": POSTER_W * 2, "height": POSTER_H * 2, "minSize": 1},
+                         raw=True, tls_name=self.tls_name)
 
     def command(self, s: Session, cmd: str, value: int = 0):
         pass  # display-only, see the module docstring
+
+    def info(self) -> dict:
+        """Version and library sizes, for the board while nothing plays."""
+        root = (self._get(self.url, self.token, "/", tls_name=self.tls_name).get("MediaContainer") or {})
+        counts = {}
+        sections = (self._get(self.url, self.token, "/library/sections", tls_name=self.tls_name)
+                    .get("MediaContainer") or {}).get("Directory") or []
+        # Plex item types: 1 movie, 2 show, 4 episode, 8 artist, 10 track.
+        wanted = {"movie": [(1, "movies")], "show": [(2, "shows"), (4, "episodes")], "artist": [(10, "songs")]}
+        for sec in sections:
+            for kind, label in wanted.get(sec.get("type"), []):
+                mc = self._get(self.url, self.token, f"/library/sections/{sec.get('key')}/all",
+                               {"type": kind, "X-Plex-Container-Start": 0, "X-Plex-Container-Size": 0},
+                               tls_name=self.tls_name).get("MediaContainer") or {}
+                counts[label] = counts.get(label, 0) + int(mc.get("totalSize", mc.get("size", 0)) or 0)
+        return {"product": "Plex Media Server", "version": ".".join(str(root.get("version", "")).split("-")[0].split(".")[:3]),
+                "counts": counts}
 
 
 # Plex sign-in through plex.tv: the user approves a PIN in the browser.
@@ -343,7 +363,16 @@ class JellyfinServer:
 
     def cover(self, s: Session) -> bytes:
         return self._req("GET", self.url, self.key, f"/Items/{s.art_key}/Images/Primary",
-                         {"maxWidth": ART_SIZE * 2, "maxHeight": ART_SIZE * 2, "quality": 90}, raw=True)
+                         {"maxWidth": POSTER_W * 2, "maxHeight": POSTER_H * 2, "quality": 90}, raw=True)
+
+    def info(self) -> dict:
+        """Version and library sizes, for the board while nothing plays."""
+        sysinfo = self._req("GET", self.url, self.key, "/System/Info") or {}
+        c = self._req("GET", self.url, self.key, "/Items/Counts") or {}
+        counts = {label: int(c.get(key) or 0) for key, label in
+                  (("MovieCount", "movies"), ("SeriesCount", "shows"), ("EpisodeCount", "episodes"),
+                   ("SongCount", "songs")) if c.get(key)}
+        return {"product": "Jellyfin", "version": str(sysinfo.get("Version", "")), "counts": counts}
 
     def command(self, s: Session, cmd: str, value: int = 0):
         if not s.can_control:
@@ -408,12 +437,23 @@ def parse_discovery(data: bytes, ip: str) -> dict | None:
 # ---- all servers together, for the companion ---------------------------------
 
 def to_poster_frame(art_id: int, raw: bytes) -> bytes:
-    """Fit a cover (often a tall poster) inside the square, on black, as an ART1 frame."""
+    """Fit a cover inside a 2:3 poster on black (square album art gets bands), as an
+    ARS1 frame: the server's own cover slot, so it doesn't replace the PC's."""
     im = Image.open(io.BytesIO(raw)).convert("RGB")
-    im.thumbnail((ART_SIZE, ART_SIZE), Image.LANCZOS)
-    canvas = Image.new("RGB", (ART_SIZE, ART_SIZE), (0, 0, 0))
-    canvas.paste(im, ((ART_SIZE - im.width) // 2, (ART_SIZE - im.height) // 2))
-    return art_frame(art_id, canvas)
+    im.thumbnail((POSTER_W, POSTER_H), Image.LANCZOS)
+    canvas = Image.new("RGB", (POSTER_W, POSTER_H), (0, 0, 0))
+    canvas.paste(im, ((POSTER_W - im.width) // 2, (POSTER_H - im.height) // 2))
+    return art_frame(art_id, canvas, SERVER_ART_MAGIC)
+
+
+def plural(n: int, word: str) -> str:
+    return f"{n:,} {word[:-1] if n == 1 else word}"
+
+
+def describe(info: dict | None) -> str:
+    """'312 movies, 45 shows, 2,104 episodes' from a server's info()."""
+    counts = (info or {}).get("counts") or {}
+    return ", ".join(plural(counts[k], k) for k in ("movies", "shows", "episodes", "songs") if counts.get(k))
 
 
 def build_servers(entries: list[dict]) -> list:
@@ -442,6 +482,8 @@ class MediaServers:
         self.sessions: list[tuple[object, Session]] = []
         self.current: tuple[object, Session] | None = None
         self._failed_at: dict[int, float] = {}
+        self.infos: dict[int, dict] = {}
+        self._info_at: dict[int, float] = {}
         self._art_key = None
         self._art_failed = (None, 0.0)
         self._art_id = 0
@@ -468,8 +510,18 @@ class MediaServers:
             except Exception as e:
                 log.info("%s at %s: %s", srv.name, srv.url, e)
                 self._failed_at[i] = now
+                continue
+            if now - self._info_at.get(i, -INFO_S) >= INFO_S:
+                self._info_at[i] = now
+                try:
+                    self.infos[i] = srv.info()
+                except Exception as e:
+                    log.info("%s info: %s", srv.name, e)
         self.sessions = found
         self.current = self._pick()
+
+    def online(self, i: int) -> bool:
+        return i not in self._failed_at
 
     def _pick(self):
         if not self.sessions:
@@ -487,7 +539,7 @@ class MediaServers:
         return POLL_ACTIVE_S if self.sessions else POLL_IDLE_S
 
     def art(self) -> bytes | None:
-        """A new ART1 frame when the shown cover changed (blocking)."""
+        """A new ARS1 frame when the shown cover changed (blocking)."""
         if not self.current:
             return None
         srv, s = self.current
@@ -517,15 +569,37 @@ class MediaServers:
         return self._art_frame if self.current else None
 
     def message(self, now: float | None = None) -> dict:
+        """The board's server section: the shown session, or the server itself while idle."""
+        if self.current:
+            srv = self.current[0]
+        else:
+            # Idle: the first server that answers (or the first at all).
+            srv = next((s for i, s in enumerate(self.servers) if self.online(i)), self.servers[0]) \
+                if self.servers else None
+        i = self.servers.index(srv) if srv in self.servers else -1
+        info = self.infos.get(i) or {}
+        product = info.get("product") or ("Plex Media Server" if getattr(srv, "kind", "") == "plex" else "Jellyfin")
+        version = f"{product} {info['version']}" if info.get("version") else product
+        msg = {
+            "type": "media_server",
+            "configured": bool(self.servers),
+            "name": ascii_fold(srv.name if srv else "", 31),
+            "kind": getattr(srv, "kind", ""),
+            "online": self.online(i) if i >= 0 else False,
+            "version": ascii_fold(version, 47),
+            "library": ascii_fold(describe(info), 95),
+            "streams": len(self.sessions),
+            "transcoding": sum(1 for _, s in self.sessions if s.transcoding),
+            "active": False,
+        }
         if not self.current:
-            return {"type": "media", "active": False}
-        srv, s = self.current
+            return msg
+        s = self.current[1]
         who = " - ".join(x for x in (s.device, s.user) if x)
         others = len(self.sessions) - 1
         if others > 0:
             who = f"{who} (+{others} more)" if who else f"+{others} more"
-        return {
-            "type": "media",
+        msg.update({
             "active": True,
             "playing": s.playing,
             "title": ascii_fold(s.title, 120),
@@ -537,7 +611,8 @@ class MediaServers:
             "can_seek": s.can_seek and s.dur > 0,
             "controls": s.can_control,
             "art_id": self._art_id,
-        }
+        })
+        return msg
 
     def command(self, cmd: str, value: int = 0):
         """Run a board button on the shown session (blocking)."""

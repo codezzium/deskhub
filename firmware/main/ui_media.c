@@ -1,10 +1,11 @@
 // Media: whatever Windows reports as the current media session
 // (Spotify, YouTube in a browser, etc.), with cover art and controls.
-// With nothing playing on the PC, the companion may send a Plex or Jellyfin
-// session instead (display-only when "controls" is false).
+// With a Plex or Jellyfin server set up, the page splits: this PC on top, the
+// server below (its session, or the server and its library while nothing plays).
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 #include "icons.h"
 #include "ui_internal.h"
@@ -37,6 +38,259 @@ static void seek_cb(lv_event_t *e)
         s_pos_s = v;
         ui_send_media("seek", v);
     }
+}
+
+// ---- split view: this PC on top, the media server below -------------------
+// Shown once the companion says a Plex or Jellyfin server is set up.
+
+#define ROW_GAP 12
+#define BTN_W (44 + 56 + 44 + 2 * 10)
+
+typedef struct {
+    bool server;
+    lv_obj_t *card, *art_ph, *ph_icon, *frame, *art;
+    lv_obj_t *source, *title, *artist, *album;
+    lv_obj_t *slider, *pos, *dur, *controls, *play;
+    int pos_s;
+    int tx, tw_btn, tw_full;   // text column: x, and width beside the buttons or without them
+} media_row_t;
+
+static lv_obj_t *s_split;
+static media_row_t s_rows[2];   // 0 = this PC, 1 = the server
+
+static void row_cmd_cb(lv_event_t *e)
+{
+    media_row_t *r = lv_obj_get_user_data(lv_event_get_current_target(e));
+    const char *cmd = lv_event_get_user_data(e);
+    if (r->server) ui_send_server(cmd, 0);
+    else ui_send_media(cmd, 0);
+}
+
+static void row_seek_cb(lv_event_t *e)
+{
+    media_row_t *r = lv_event_get_user_data(e);
+    int v = lv_slider_get_value(r->slider);
+    char buf[16];
+    if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED) {
+        ui_fmt_duration(buf, sizeof(buf), v);
+        lv_label_set_text(r->pos, buf);
+    } else {
+        r->pos_s = v;
+        if (r->server) ui_send_server("seek", v);
+        else ui_send_media("seek", v);
+    }
+}
+
+static lv_obj_t *row_button(media_row_t *r, int size, uint32_t bg, const char *glyph, const char *cmd)
+{
+    lv_obj_t *b = ui_round_button(r->controls, size, bg, size > 48 ? g_icon_32 : g_icon_24, glyph, row_cmd_cb,
+                                  (void *)cmd);
+    lv_obj_set_user_data(b, r);
+    return b;
+}
+
+static void row_create(media_row_t *r, bool server, int y, int h)
+{
+    int inner_w = CONTENT_W - 34, inner_h = h - 34;
+    int art_h = inner_h, art_w = server ? inner_h * 2 / 3 : inner_h;
+    int tx = art_w + 18, tw = inner_w - tx - BTN_W - 16;
+    r->server = server;
+    r->tx = tx;
+    r->tw_btn = tw;
+    r->tw_full = inner_w - tx;
+    r->card = ui_card(s_split);
+    lv_obj_set_size(r->card, CONTENT_W, h);
+    lv_obj_set_pos(r->card, 0, y);
+    lv_obj_remove_flag(r->card, LV_OBJ_FLAG_CLICKABLE);
+
+    r->art_ph = lv_obj_create(r->card);
+    lv_obj_remove_style_all(r->art_ph);
+    lv_obj_set_size(r->art_ph, art_w, art_h);
+    lv_obj_set_style_radius(r->art_ph, 12, 0);
+    lv_obj_set_style_bg_color(r->art_ph, lv_color_hex(COL_CARD_HI), 0);
+    lv_obj_set_style_bg_opa(r->art_ph, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(r->art_ph, LV_OBJ_FLAG_CLICKABLE);
+    r->ph_icon = ui_label(r->art_ph, g_icon_48, COL_DIM, server ? ICON_MOVIE : ICON_MUSIC_NOTE);
+    lv_obj_center(r->ph_icon);
+
+    r->frame = lv_obj_create(r->card);
+    lv_obj_remove_style_all(r->frame);
+    lv_obj_set_size(r->frame, art_w, art_h);
+    lv_obj_set_style_radius(r->frame, 12, 0);
+    lv_obj_set_style_clip_corner(r->frame, true, 0);
+    lv_obj_remove_flag(r->frame, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    r->art = lv_image_create(r->frame);
+    lv_obj_set_size(r->art, art_w, art_h);
+    lv_image_set_inner_align(r->art, LV_IMAGE_ALIGN_STRETCH);
+    lv_obj_add_flag(r->art, LV_OBJ_FLAG_HIDDEN);
+
+    // Text block centred in the card's height when there's room to spare.
+    int ty = inner_h > 146 ? (inner_h - 146) / 2 : 0;
+    r->source = ui_label(r->card, g_font_14, COL_ACCENT, "");
+    lv_obj_set_pos(r->source, tx, ty);
+    lv_obj_set_width(r->source, tw);
+    lv_label_set_long_mode(r->source, LV_LABEL_LONG_DOT);
+    r->title = ui_label(r->card, g_font_24, COL_TEXT, "");
+    ui_marquee(r->title);
+    lv_obj_set_width(r->title, tw);
+    lv_obj_set_pos(r->title, tx, ty + 20);
+    r->artist = ui_label(r->card, g_font_16, COL_TEXT, "");
+    ui_marquee(r->artist);
+    lv_obj_set_width(r->artist, tw);
+    lv_obj_set_pos(r->artist, tx, ty + 54);
+    r->album = ui_label(r->card, g_font_14, COL_MUTED, "");
+    ui_marquee(r->album);
+    lv_obj_set_width(r->album, tw);
+    lv_obj_set_pos(r->album, tx, ty + 78);
+
+    r->slider = lv_slider_create(r->card);
+    lv_obj_set_size(r->slider, tw - 12, 6);
+    lv_obj_set_pos(r->slider, tx + 6, ty + 110);
+    lv_slider_set_range(r->slider, 0, 1);
+    lv_obj_set_style_bg_color(r->slider, lv_color_hex(COL_CARD_HI), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(r->slider, lv_color_hex(COL_TEXT), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(r->slider, lv_color_hex(COL_TEXT), LV_PART_KNOB);
+    lv_obj_set_style_pad_all(r->slider, 5, LV_PART_KNOB);
+    lv_obj_set_ext_click_area(r->slider, 16);
+    lv_obj_add_event_cb(r->slider, row_seek_cb, LV_EVENT_VALUE_CHANGED, r);
+    lv_obj_add_event_cb(r->slider, row_seek_cb, LV_EVENT_RELEASED, r);
+    r->pos = ui_label(r->card, g_font_14, COL_MUTED, "0:00");
+    lv_obj_set_pos(r->pos, tx, ty + 124);
+    r->dur = ui_label(r->card, g_font_14, COL_MUTED, "");
+    lv_obj_set_width(r->dur, 80);
+    lv_obj_set_style_text_align(r->dur, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_pos(r->dur, tx + tw - 80, ty + 124);
+
+    r->controls = lv_obj_create(r->card);
+    lv_obj_remove_style_all(r->controls);
+    lv_obj_set_size(r->controls, BTN_W, 60);
+    lv_obj_align(r->controls, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_flex_flow(r->controls, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(r->controls, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(r->controls, 10, 0);
+    lv_obj_remove_flag(r->controls, LV_OBJ_FLAG_SCROLLABLE);
+    row_button(r, 44, COL_CARD_HI, ICON_SKIP_PREVIOUS, "prev");
+    r->play = row_button(r, 56, COL_TEXT, ICON_PLAY_ARROW, "toggle");
+    lv_obj_set_style_text_color(lv_obj_get_child(r->play, 0), lv_color_hex(COL_BG), 0);
+    row_button(r, 44, COL_CARD_HI, ICON_SKIP_NEXT, "next");
+}
+
+static void show(lv_obj_t *o, bool on)
+{
+    if (on) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void row_show_pos(media_row_t *r)
+{
+    char buf[16];
+    if (lv_slider_is_dragged(r->slider)) return;
+    lv_slider_set_value(r->slider, r->pos_s, LV_ANIM_OFF);
+    ui_fmt_duration(buf, sizeof(buf), r->pos_s);
+    lv_label_set_text(r->pos, buf);
+}
+
+static void set_text(lv_obj_t *label, const char *text)
+{
+    // Leave an unchanged label alone so its scrolling doesn't restart every second.
+    if (strcmp(lv_label_get_text(label), text) != 0) lv_label_set_text(label, text);
+}
+
+// Fill a row with a session, or with `idle_*` lines when nothing plays.
+static void row_fill(media_row_t *r, const hub_media_t *m, const char *source,
+                     const char *idle_title, const char *idle_sub, const char *idle_small)
+{
+    char src[64];
+    strlcpy(src, source, sizeof(src));
+    for (char *p = src; *p; p++) *p = toupper((unsigned char)*p);
+    set_text(r->source, src);
+    bool on = m->active;
+    set_text(r->title, on ? m->title : idle_title);
+    set_text(r->artist, on ? m->artist : idle_sub);
+    set_text(r->album, on ? m->album : idle_small);
+    lv_obj_set_style_text_color(r->title, lv_color_hex(on ? COL_TEXT : COL_MUTED), 0);
+    lv_obj_set_style_text_color(r->artist, lv_color_hex(on ? COL_TEXT : COL_MUTED), 0);
+    show(r->slider, on && m->dur > 0);
+    show(r->pos, on && m->dur > 0);
+    show(r->dur, on && m->dur > 0);
+    bool buttons = on && !m->no_controls;
+    show(r->controls, buttons);
+    // Without buttons the text and progress bar take the whole width.
+    int w = buttons ? r->tw_btn : r->tw_full;
+    if (lv_obj_get_style_width(r->title, 0) != w) {
+        lv_obj_set_width(r->source, w);
+        lv_obj_set_width(r->title, w);
+        lv_obj_set_width(r->artist, w);
+        lv_obj_set_width(r->album, w);
+        lv_obj_set_width(r->slider, w - 12);
+        lv_obj_set_x(r->dur, r->tx + w - 80);
+    }
+    if (!on) return;
+    lv_label_set_text(lv_obj_get_child(r->play, 0), m->playing ? ICON_PAUSE : ICON_PLAY_ARROW);
+    char buf[16];
+    lv_slider_set_range(r->slider, 0, m->dur > 0 ? m->dur : 1);
+    ui_fmt_duration(buf, sizeof(buf), m->dur);
+    lv_label_set_text(r->dur, buf);
+    if (m->can_seek && m->dur > 0) lv_obj_add_flag(r->slider, LV_OBJ_FLAG_CLICKABLE);
+    else lv_obj_remove_flag(r->slider, LV_OBJ_FLAG_CLICKABLE);
+    r->pos_s = m->pos;
+    row_show_pos(r);
+}
+
+static void row_art(media_row_t *r, bool has, const lv_image_dsc_t *img)
+{
+    if (has) {
+        lv_image_set_src(r->art, img);
+        lv_obj_invalidate(r->art);
+    }
+    show(r->art, has);
+    show(r->art_ph, !has);
+}
+
+static void split_create(lv_obj_t *page)
+{
+    s_split = lv_obj_create(page);
+    lv_obj_remove_style_all(s_split);
+    lv_obj_set_size(s_split, LV_PCT(100), LV_PCT(100));
+    lv_obj_remove_flag(s_split, LV_OBJ_FLAG_SCROLLABLE);
+    int h = (CONTENT_H - ROW_GAP) / 2;
+    row_create(&s_rows[0], false, 0, h);
+    row_create(&s_rows[1], true, h + ROW_GAP, CONTENT_H - h - ROW_GAP);
+    lv_obj_add_flag(s_split, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void split_refresh_pc(void)
+{
+    row_fill(&s_rows[0], &g_media, g_media.active ? g_media.source : "This PC",
+             g_pc_online ? "Nothing playing on this PC" : "PC offline",
+             g_pc_online ? "" : "Start the companion app on your PC", "");
+}
+
+void media_refresh_server(void)
+{
+    if (!s_split) return;
+    if (!g_server.configured) {
+        media_refresh();   // back to the PC-only page
+        return;
+    }
+    const hub_server_t *s = &g_server;
+    char src[64];
+    const char *kind = strcmp(s->kind, "plex") == 0 ? "Plex" : strcmp(s->kind, "jellyfin") == 0 ? "Jellyfin" : "";
+    // "BEANS - PLEX" (just "PLEX" when the server kept its default name).
+    bool both = kind[0] && strcasecmp(kind, s->name) != 0;
+    snprintf(src, sizeof(src), "%.31s%s%s%s", s->name, both ? " - " : "", both ? kind : "",
+             s->now.active && s->transcoding ? " - transcoding" : "");
+    char idle[64];
+    if (s->online) strlcpy(idle, "Nothing playing right now", sizeof(idle));
+    else snprintf(idle, sizeof(idle), "Can't reach %.31s", s->name[0] ? s->name : "the server");
+    row_fill(&s_rows[1], &s->now, src, idle, s->online ? s->library : "", s->version);
+    if (lv_obj_has_flag(s_split, LV_OBJ_FLAG_HIDDEN)) media_refresh();
+}
+
+void media_refresh_server_art(void)
+{
+    if (s_split) row_art(&s_rows[1], ui_server_has_art(), &g_srv_art);
+    home_refresh_media();
 }
 
 void media_create(lv_obj_t *page)
@@ -125,6 +379,7 @@ void media_create(lv_obj_t *page)
     s_empty_sub = ui_label(s_empty, g_font_16, COL_DIM, "");
     lv_obj_align(s_empty_sub, LV_ALIGN_CENTER, 0, 56);
 
+    split_create(page);
     media_refresh();
 }
 
@@ -140,6 +395,19 @@ static void show_pos(void)
 void media_refresh(void)
 {
     const hub_media_t *m = &g_media;
+    if (g_server.configured) {
+        lv_obj_add_flag(s_body, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_empty, LV_OBJ_FLAG_HIDDEN);
+        if (lv_obj_has_flag(s_split, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_remove_flag(s_split, LV_OBJ_FLAG_HIDDEN);
+            media_refresh_server();
+            row_art(&s_rows[0], ui_media_has_art(), &g_art);
+            row_art(&s_rows[1], ui_server_has_art(), &g_srv_art);
+        }
+        split_refresh_pc();
+        return;
+    }
+    lv_obj_add_flag(s_split, LV_OBJ_FLAG_HIDDEN);
     if (!m->active) {
         lv_obj_add_flag(s_body, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(s_empty, LV_OBJ_FLAG_HIDDEN);
@@ -174,6 +442,7 @@ void media_refresh(void)
 
 void media_refresh_art(void)
 {
+    row_art(&s_rows[0], ui_media_has_art(), &g_art);
     if (ui_media_has_art()) {
         lv_image_set_src(s_art, &g_art);
         lv_obj_invalidate(s_art);
@@ -192,5 +461,13 @@ void media_tick(void)
     if (g_media.active && g_media.playing && g_media.dur > 0 && s_pos_s < g_media.dur) {
         s_pos_s++;
         show_pos();
+    }
+    const hub_media_t *ms[2] = {&g_media, &g_server.now};
+    for (int i = 0; i < 2 && s_split; i++) {
+        media_row_t *r = &s_rows[i];
+        if (ms[i]->active && ms[i]->playing && ms[i]->dur > 0 && r->pos_s < ms[i]->dur) {
+            r->pos_s++;
+            row_show_pos(r);
+        }
     }
 }

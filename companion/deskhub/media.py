@@ -47,17 +47,18 @@ def _source_name(app_id: str) -> str:
     return ascii_fold(base.title(), 24) or "Media"
 
 
-def art_frame(art_id: int, im: Image.Image) -> bytes:
-    """Pack an ART_SIZE square RGB image as the hub's ART1 frame (RGB565, little endian)."""
+def art_frame(art_id: int, im: Image.Image, magic: bytes = b"ART1") -> bytes:
+    """Pack an RGB image as the hub's cover frame: magic | u32 id | u16 w | u16 h | RGB565 LE."""
     px = im.tobytes()
-    out = bytearray(ART_SIZE * ART_SIZE * 2)
+    w, h = im.size
+    out = bytearray(w * h * 2)
     j = 0
     for i in range(0, len(px), 3):
         v = ((px[i] & 0xF8) << 8) | ((px[i + 1] & 0xFC) << 3) | (px[i + 2] >> 3)
         out[j] = v & 0xFF
         out[j + 1] = v >> 8
         j += 2
-    return b"ART1" + struct.pack("<IHH", art_id, ART_SIZE, ART_SIZE) + bytes(out)
+    return magic + struct.pack("<IHH", art_id, w, h) + bytes(out)
 
 
 def to_rgb565_frame(art_id: int, raw: bytes) -> bytes:

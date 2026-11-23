@@ -112,8 +112,7 @@ class Companion:
         self.token = hub.get("token", "")
         self.stats = Stats()
         self.media = Media()
-        self.servers = None     # Plex / Jellyfin, shown when nothing plays on this PC
-        self.media_source = "local"
+        self.servers = None     # Plex / Jellyfin: their own section on the Media page
         if cfg.get("media_servers"):
             from .media_server import MediaServers, build_servers
 
@@ -218,23 +217,23 @@ class Companion:
         while True:
             try:
                 msg, art = await self.media.snapshot()
-                source = "local"
-                if not msg.get("active") and self.servers and self.servers.current:
-                    # Nothing on this PC: show what plays on the media server instead.
-                    # Cover first, so the message carries the new cover's id.
-                    art = await asyncio.to_thread(self.servers.art)
-                    msg = self.servers.message()
-                    source = "server"
-                    if source != self.media_source and not art:
-                        art = self.servers.current_art()
-                elif source != self.media_source:
-                    art = art or self.media.current_art()
-                self.media_source = source
                 if art:
                     await self.send(art)
                 await self.send(msg)
             except Exception as e:
                 log.debug("media poll failed: %s", e)
+            await asyncio.sleep(1)
+
+    async def media_server_send_loop(self):
+        """The server section, once a second (the cover first, so the message names it)."""
+        while True:
+            try:
+                art = await asyncio.to_thread(self.servers.art)
+                if art:
+                    await self.send(art)
+                await self.send(self.servers.message())
+            except Exception as e:
+                log.debug("media server message failed: %s", e)
             await asyncio.sleep(1)
 
     async def media_server_loop(self):
@@ -388,10 +387,9 @@ class Companion:
         msg = json.loads(raw)
         kind = msg.get("type")
         if kind == "media":
-            if self.media_source == "server" and self.servers:
-                await asyncio.to_thread(self.servers.command, msg.get("cmd", ""), int(msg.get("value", 0)))
-            else:
-                await self.media.command(msg.get("cmd", ""), int(msg.get("value", 0)))
+            await self.media.command(msg.get("cmd", ""), int(msg.get("value", 0)))
+        elif kind == "media_server" and self.servers:
+            await asyncio.to_thread(self.servers.command, msg.get("cmd", ""), int(msg.get("value", 0)))
         elif kind == "alert_action" and self.alerts:
             sid, action = str(msg.get("id", "")), msg.get("action")
             if action == "dismiss":
@@ -451,8 +449,13 @@ class Companion:
                 await self.send(self.steam_msg)
                 for frame in await asyncio.to_thread(self.steam.all_frames):
                     await self.send(frame)
-            art = (self.servers.current_art() if self.media_source == "server" and self.servers
-                   else self.media.current_art())
+            if self.servers:
+                if self.servers.current_art():
+                    await self.send(self.servers.current_art())
+                await self.send(self.servers.message())
+            else:
+                await self.send({"type": "media_server", "configured": False})
+            art = self.media.current_art()
             if art:
                 await self.send(art)
             async for raw in ws:
@@ -469,6 +472,7 @@ class Companion:
         asyncio.create_task(self.media_loop())
         if self.servers:
             asyncio.create_task(self.media_server_loop())
+            asyncio.create_task(self.media_server_send_loop())
         asyncio.create_task(self.calendar_loop())
         asyncio.create_task(self.claude_loop())
         if any(t["state"] for t in self.tiles):

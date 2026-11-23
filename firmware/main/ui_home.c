@@ -58,9 +58,16 @@ lv_obj_t *home_claude_card(void)
 }
 static lv_obj_t *s_pr_name, *s_pr_state, *s_pr_file, *s_pr_bar, *s_pr_info;
 
+// The media widget shows the PC, or the media server's session while the PC is idle.
+static bool home_shows_server(void)
+{
+    return !g_media.active && g_server.configured && g_server.now.active;
+}
+
 static void play_cb(lv_event_t *e)
 {
-    ui_send_media("toggle", 0);
+    if (home_shows_server()) ui_send_server("toggle", 0);
+    else ui_send_media("toggle", 0);
 }
 
 static void open_page_cb(lv_event_t *e)
@@ -1276,15 +1283,21 @@ void home_refresh_weather(void)
 
 void home_refresh_media(void)
 {
-    bool active = g_media.active;
-    lv_label_set_text(s_md_title, active ? g_media.title : "Nothing playing");
-    lv_label_set_text(s_md_artist, active ? g_media.artist : (g_pc_online ? "" : "PC offline"));
-    lv_label_set_text(lv_obj_get_child(s_md_btn, 0), g_media.playing ? ICON_PAUSE : ICON_PLAY_ARROW);
-    if (active && !g_media.no_controls) lv_obj_remove_flag(s_md_btn, LV_OBJ_FLAG_HIDDEN);
+    bool server = home_shows_server();
+    const hub_media_t *m = server ? &g_server.now : &g_media;
+    bool active = m->active;
+    lv_label_set_text(s_md_title, active ? m->title : "Nothing playing");
+    lv_label_set_text(s_md_artist, active ? m->artist : (g_pc_online ? "" : "PC offline"));
+    lv_label_set_text(lv_obj_get_child(s_md_btn, 0), m->playing ? ICON_PAUSE : ICON_PLAY_ARROW);
+    if (active && !m->no_controls) lv_obj_remove_flag(s_md_btn, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(s_md_btn, LV_OBJ_FLAG_HIDDEN);
 
-    if (ui_media_has_art()) {
-        lv_image_set_src(s_md_art, &g_art);
+    bool has_art = server ? ui_server_has_art() : ui_media_has_art();
+    // A server poster is 2:3: narrower, centred in the square frame.
+    lv_obj_set_size(s_md_art, server ? 43 : 64, 64);
+    lv_obj_set_x(s_md_art, server ? 10 : 0);
+    if (has_art) {
+        lv_image_set_src(s_md_art, server ? &g_srv_art : &g_art);
         lv_obj_invalidate(s_md_art);
         lv_obj_remove_flag(s_md_art, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_md_ph, LV_OBJ_FLAG_HIDDEN);

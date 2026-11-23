@@ -57,6 +57,9 @@ extern int g_event_count;
 extern int g_event_days;   // how many days ahead the events cover
 extern lv_image_dsc_t g_art;     // valid when g_art_id != 0
 extern uint32_t g_art_id;
+extern hub_server_t g_server;
+extern lv_image_dsc_t g_srv_art; // valid when g_srv_art_id != 0
+extern uint32_t g_srv_art_id;
 extern bool g_pc_online;
 
 lv_obj_t *ui_card(lv_obj_t *parent);
@@ -78,6 +81,8 @@ void ui_fmt_duration(char *buf, size_t n, int s);   // "3:07"
 void ui_utf8_glyph(char out[5], uint32_t cp);
 const char *ui_icon_by_name(const char *name, char out[5]);
 bool ui_media_has_art(void);
+bool ui_server_has_art(void);
+void ui_send_server(const char *cmd, int value);
 void ui_show_page(int page);
 
 enum { PAGE_HOME, PAGE_STATS, PAGE_CLAUDE, PAGE_CALENDAR, PAGE_WEATHER, PAGE_MEDIA, PAGE_PRINTER, PAGE_SHORTCUTS, PAGE_TIMER, PAGE_GAMES, PAGE_NETWORK,
@@ -125,6 +130,8 @@ void media_create(lv_obj_t *page);
 void media_refresh(void);
 void media_refresh_art(void);
 void media_tick(void);
+void media_refresh_server(void);
+void media_refresh_server_art(void);
 
 void calendar_create(lv_obj_t *page);
 // force = rebuild even if the visible events look unchanged.

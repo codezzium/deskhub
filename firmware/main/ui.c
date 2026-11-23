@@ -54,6 +54,10 @@ int g_event_count;
 int g_event_days = 7;
 lv_image_dsc_t g_art;
 uint32_t g_art_id;
+hub_server_t g_server;
+lv_image_dsc_t g_srv_art;
+uint32_t g_srv_art_id;
+static uint8_t *s_srv_art_buf;
 bool g_pc_online;
 
 static uint8_t *s_art_buf;
@@ -397,6 +401,18 @@ const char *ui_icon_by_name(const char *name, char out[5])
 bool ui_media_has_art(void)
 {
     return g_media.active && g_art_id != 0 && g_media.art_id == g_art_id;
+}
+
+bool ui_server_has_art(void)
+{
+    return g_server.now.active && g_srv_art_id != 0 && g_server.now.art_id == g_srv_art_id;
+}
+
+void ui_send_server(const char *cmd, int value)
+{
+    char buf[96];
+    snprintf(buf, sizeof(buf), "{\"type\":\"media_server\",\"cmd\":\"%s\",\"value\":%d}", cmd, value);
+    hub_server_send(buf);
 }
 
 void ui_send_media(const char *cmd, int value)
@@ -817,6 +833,7 @@ void ui_init(void)
     }
 
     s_art_buf = heap_caps_malloc(320 * 320 * 2, MALLOC_CAP_SPIRAM);
+    s_srv_art_buf = heap_caps_malloc(320 * 320 * 2, MALLOC_CAP_SPIRAM);
 
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_hex(COL_BG), 0);
@@ -883,6 +900,32 @@ void ui_set_art(uint32_t id, uint16_t w, uint16_t h, const uint8_t *rgb565)
     g_art.data = s_art_buf;
     g_art_id = id;
     media_refresh_art();
+}
+
+void ui_set_server(const hub_server_t *s)
+{
+    bool art_changed = s->now.art_id != g_server.now.art_id || s->now.active != g_server.now.active;
+    g_server = *s;
+    media_refresh_server();
+    home_refresh_media();
+    if (art_changed) media_refresh_server_art();
+}
+
+void ui_set_server_art(uint32_t id, uint16_t w, uint16_t h, const uint8_t *rgb565)
+{
+    if (!s_srv_art_buf) return;
+    memcpy(s_srv_art_buf, rgb565, (size_t)w * h * 2);
+    lv_image_cache_drop(&g_srv_art);
+    memset(&g_srv_art, 0, sizeof(g_srv_art));
+    g_srv_art.header.magic = LV_IMAGE_HEADER_MAGIC;
+    g_srv_art.header.cf = LV_COLOR_FORMAT_RGB565;
+    g_srv_art.header.w = w;
+    g_srv_art.header.h = h;
+    g_srv_art.header.stride = w * 2;
+    g_srv_art.data_size = (uint32_t)w * h * 2;
+    g_srv_art.data = s_srv_art_buf;
+    g_srv_art_id = id;
+    media_refresh_server_art();
 }
 
 static int event_cmp(const void *a, const void *b)

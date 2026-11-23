@@ -111,6 +111,35 @@ static void on_media(const cJSON *m)
     display_unlock();
 }
 
+static void on_media_server(const cJSON *m)
+{
+    static hub_server_t s;
+    memset(&s, 0, sizeof(s));
+    s.configured = get_bool(m, "configured");
+    s.online = get_bool(m, "online");
+    s.streams = (int)get_num(m, "streams", 0);
+    s.transcoding = (int)get_num(m, "transcoding", 0);
+    copy_str(s.name, sizeof(s.name), m, "name");
+    copy_str(s.kind, sizeof(s.kind), m, "kind");
+    copy_str(s.version, sizeof(s.version), m, "version");
+    copy_str(s.library, sizeof(s.library), m, "library");
+    hub_media_t *md = &s.now;
+    md->active = get_bool(m, "active");
+    md->playing = get_bool(m, "playing");
+    md->can_seek = get_bool(m, "can_seek");
+    md->no_controls = cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(m, "controls"));
+    md->pos = (int)get_num(m, "pos", 0);
+    md->dur = (int)get_num(m, "dur", 0);
+    md->art_id = (uint32_t)get_num(m, "art_id", 0);
+    copy_str(md->title, sizeof(md->title), m, "title");
+    copy_str(md->artist, sizeof(md->artist), m, "artist");
+    copy_str(md->album, sizeof(md->album), m, "album");
+    copy_str(md->source, sizeof(md->source), m, "source");
+    display_lock();
+    ui_set_server(&s);
+    display_unlock();
+}
+
 static void on_events(const cJSON *m)
 {
     static hub_event_t ev[HUB_MAX_EVENTS];
@@ -545,6 +574,7 @@ static void on_text(int fd, char *text)
         s_last_rx_ms = now_ms();
         if (strcmp(type, "stats") == 0) on_stats(m);
         else if (strcmp(type, "media") == 0) on_media(m);
+        else if (strcmp(type, "media_server") == 0) on_media_server(m);
         else if (strcmp(type, "events") == 0) on_events(m);
         else if (strcmp(type, "tiles") == 0) on_tiles(m);
         else if (strcmp(type, "ai") == 0 || strcmp(type, "claude") == 0) on_claude(m);
@@ -564,6 +594,7 @@ static void on_text(int fd, char *text)
 }
 
 // Cover art: "ART1" | u32 art_id | u16 w | u16 h | w*h RGB565 little endian.
+// Media server poster: the same with "ARS1".
 // Steam cover: "STM1" | u32 appid | u16 w | u16 h | u16 kind | u16 0 | w*h RGB565.
 static void on_steam_art(const uint8_t *buf, size_t len)
 {
@@ -588,7 +619,8 @@ static void on_binary(const uint8_t *buf, size_t len)
         on_steam_art(buf, len);
         return;
     }
-    if (len < 12 || memcmp(buf, ART_MAGIC, 4) != 0) return;
+    bool server = len >= 4 && memcmp(buf, "ARS1", 4) == 0;
+    if (len < 12 || (!server && memcmp(buf, ART_MAGIC, 4) != 0)) return;
     uint32_t id = buf[4] | buf[5] << 8 | buf[6] << 16 | (uint32_t)buf[7] << 24;
     uint16_t w = buf[8] | buf[9] << 8;
     uint16_t h = buf[10] | buf[11] << 8;
@@ -598,7 +630,8 @@ static void on_binary(const uint8_t *buf, size_t len)
     }
     s_last_rx_ms = now_ms();
     display_lock();
-    ui_set_art(id, w, h, buf + 12);
+    if (server) ui_set_server_art(id, w, h, buf + 12);
+    else ui_set_art(id, w, h, buf + 12);
     display_unlock();
 }
 

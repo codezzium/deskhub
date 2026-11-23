@@ -390,7 +390,7 @@ colors = "green"   # or "accent": shades of the board's amber
 
 ## Plex and Jellyfin
 
-When nothing plays on the PC, the Media page and the Home widget show what plays on your media server instead: the TV, a phone, someone else's stream. You see the title, the show and episode (or the artist, or the movie's year), the poster, progress, and which device and user it plays for. With several streams going, the one playing wins and `(+2 more)` says how many others there are. `transcoding` appears next to the server's name when the server converts the stream.
+With a media server set up, the Media page splits in two: this PC on top, the server below. The server card shows what plays anywhere (the TV, a phone, someone else's stream): the poster, the title, the show and episode (or the artist, or the movie's year), progress, and which device and user it plays for. With several streams going, the one playing wins and `(+2 more)` says how many others there are. `transcoding` appears next to the server's name when the server converts the stream. While nothing plays, the card says so and shows the server's library (`312 movies, 45 shows, 2,104 episodes`) and version. The Home media widget shows the PC, or the server's session while the PC is idle.
 
 ```powershell
 uv run deskhub-setup media
@@ -728,8 +728,9 @@ The board runs a WebSocket server at `ws://deskhub.local/ws`. The companion conn
 | From the PC | Contents |
 | --- | --- |
 | `stats` | `cpu`, `ram_used`/`ram_total` (GB), `gpu`, `gpu_temp`, `vram_used`/`vram_total`, `net_down`/`net_up` (KB/s), `disk` (%), CPU and GPU names. Sent every second. |
-| `media` | `active`, `playing`, `title`, `artist`, `album`, `source`, `pos`/`dur` (seconds), `can_seek`, `art_id`, and `controls` (`false` hides the buttons, for a Plex session). Sent every second. |
-| binary | `ART1`, then `u32 art_id`, `u16 width`, `u16 height` and the cover's RGB565 little-endian pixels. Sent when the cover changes. |
+| `media` | `active`, `playing`, `title`, `artist`, `album`, `source`, `pos`/`dur` (seconds), `can_seek`, `art_id`, and `controls` (`false` hides the buttons). Sent every second. |
+| `media_server` | `configured`, `name`, `kind` (`plex`/`jellyfin`), `online`, `version`, `library`, `streams`, `transcoding`, then the shown session in the same fields as `media` (`active` false while nothing plays). Sent every second when a server is set up; `configured: false` otherwise. |
+| binary | `ART1`, then `u32 art_id`, `u16 width`, `u16 height` and the cover's RGB565 little-endian pixels. Sent when the cover changes. `ARS1` is the same for the media server's poster (2:3). |
 | `events` | Up to 16 events with `title`, `loc`, `cal`, `start`/`end` (Unix time), `all_day`, `color`. |
 | `tiles` | Up to 16 buttons with `label`, `icon`, `color`. |
 | `layout` | `pages`, the page names to show; `nav` (`left`, `right` or `bottom`); `pc_sleep` (`off`, `clock` or `none`); `night_start`/`night_end` (minutes after midnight, -1 = no night mode) and `night_style` (`off` or `clock`). Sent right after `hello_ok`. |
@@ -746,6 +747,7 @@ The board runs a WebSocket server at `ws://deskhub.local/ws`. The companion conn
 | From the board | Contents |
 | --- | --- |
 | `media` | `cmd` (`toggle`, `next`, `prev` or `seek`) and `value` (seconds, for `seek`) |
+| `media_server` | the same, for the server's session (Jellyfin) |
 | `speedtest` | no fields; runs a speed test now (at most one per 2 minutes) |
 | `steam_launch` | `appid`, a recent or running game to launch |
 | `shortcut` | `id`, the button's index. The PC looks up what the button does, so the board never holds commands. |

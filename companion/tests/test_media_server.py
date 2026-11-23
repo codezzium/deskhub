@@ -15,7 +15,6 @@ import tempfile
 from PIL import Image
 
 from deskhub import media_server as ms, setup_cli
-from deskhub.media import ART_SIZE
 
 problems = []
 
@@ -52,7 +51,14 @@ def plex_get(url, token, path, params=None, raw=False, tls_name=""):
     if path == "/status/sessions":
         return PLEX_SESSIONS
     if path == "/photo/:/transcode":
-        return png(200, 300)
+        return png(300, 300)   # square, so the 2:3 poster frame gets bands
+    if path == "/":
+        return {"MediaContainer": {"version": "1.41.2.9200-c6bbc1b53"}}
+    if path == "/library/sections":
+        return {"MediaContainer": {"Directory": [{"key": "1", "type": "movie"}, {"key": "2", "type": "show"},
+                                                 {"key": "3", "type": "photo"}]}}
+    if path.startswith("/library/sections/"):
+        return {"MediaContainer": {"totalSize": {1: 312, 2: 45, 4: 2104}[params["type"]]}}
     raise AssertionError(path)
 
 
@@ -98,6 +104,10 @@ def jf_request(method, url, key, path, params=None, raw=False):
         return png(400, 400, (0, 0, 255))
     if method == "POST":
         return None
+    if path == "/System/Info":
+        return {"Version": "10.10.3", "ServerName": "jelly"}
+    if path == "/Items/Counts":
+        return {"MovieCount": 1, "SeriesCount": 0, "EpisodeCount": 0, "SongCount": 5000}
     raise AssertionError(path)
 
 
@@ -134,6 +144,10 @@ check(msg["active"] and msg["playing"] and msg["title"] == "A Movie", f"message:
 check(msg["pos"] == 64 and msg["dur"] == 7200, f"position extrapolated while playing: {msg}")
 check(msg["source"] == "Plex - transcoding", f"source: {msg['source']}")
 check(msg["album"] == "Phone - sam (+4 more)", f"who and how many more: {msg['album']}")
+check(msg["type"] == "media_server" and msg["name"] == "Plex" and msg["online"], f"server section: {msg}")
+check(msg["streams"] == 5 and msg["transcoding"] == 1, f"stream counts: {msg}")
+check(msg["version"] == "Plex Media Server 1.41.2", f"version: {msg['version']}")
+check(msg["library"] == "312 movies, 45 shows, 2,104 episodes", f"library: {msg['library']}")
 check(msg["controls"] is False and msg["can_seek"] is False, "plex: no controls on the board")
 
 # Sticky: a later poll keeps showing the same session while it plays.
@@ -147,13 +161,13 @@ check(both.current[1].id == "abc", f"moves to a playing session: {both.current[1
 
 # Covers: a tall poster fits inside the square, on black.
 frame = both.art()
-check(frame is not None and frame[:4] == b"ART1", "cover frame")
+check(frame is not None and frame[:4] == b"ARS1", "server cover has its own frame type")
 art_id, w, h = struct.unpack("<IHH", frame[4:12])
-check((w, h) == (ART_SIZE, ART_SIZE) and len(frame) == 12 + w * h * 2, "cover size")
+check((w, h) == (ms.POSTER_W, ms.POSTER_H) and len(frame) == 12 + w * h * 2, "2:3 poster size")
 px = frame[12:]
 corner = px[0] | px[1] << 8
 middle = (h // 2 * w + w // 2) * 2
-check(corner == 0 and (px[middle] | px[middle + 1] << 8) != 0, "poster letterboxed, not cropped")
+check(corner == 0 and (px[middle] | px[middle + 1] << 8) != 0, "square cover letterboxed, not cropped")
 check(both.art() is None, "no new frame for the same cover")
 check(both.message()["art_id"] == art_id and both.current_art() == frame, "message names the cover")
 
@@ -189,7 +203,24 @@ check(jf_calls[-1][1] != "/Sessions/s2/Playing/Seek", "no seek when the session 
 # Nothing anywhere.
 empty = ms.MediaServers([])
 empty.poll()
-check(empty.message() == {"type": "media", "active": False} and empty.interval() == ms.POLL_IDLE_S, "idle")
+check(empty.message()["configured"] is False and empty.interval() == ms.POLL_IDLE_S, "nothing set up")
+
+# Idle server: its name, version and library, "nothing playing".
+quiet = ms.MediaServers([jf], users=["nobody"])
+quiet.poll(now=0.0)
+q = quiet.message()
+check(q["active"] is False and q["configured"] and q["online"] and q["name"] == "Home Jellyfin", f"idle: {q}")
+check(q["version"] == "Jellyfin 10.10.3" and q["library"] == "1 movie, 5,000 songs", f"idle info: {q}")
+n_info = len([c for c in jf_calls if c[1] == "/System/Info"])
+quiet.poll(now=60.0)
+check(len([c for c in jf_calls if c[1] == "/System/Info"]) == n_info, "library sizes not asked every poll")
+quiet.poll(now=ms.INFO_S + 1)
+check(len([c for c in jf_calls if c[1] == "/System/Info"]) == n_info + 1, "refreshed after a while")
+# Unreachable: offline, still named.
+down = ms.MediaServers([ms.PlexServer("http://plex.test:32400", "bad", "beans", get=plex_get)])
+down.poll(now=0.0)
+d = down.message()
+check(d["online"] is False and d["name"] == "beans" and not d["active"], f"offline server: {d}")
 
 # A server that fails waits out the back-off, keeping its last sessions.
 bad = ms.PlexServer("http://plex.test:32400", "bad", get=plex_get)

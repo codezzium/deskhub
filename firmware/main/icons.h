@@ -10,6 +10,7 @@
 #define ICON_SYSTEM_UPDATE      "\xEE\x98\xAA" /* e62a */
 #define ICON_SPEED              "\xEE\xA7\xA4" /* e9e4 */
 #define ICON_MUSIC_NOTE         "\xEE\x90\x85" /* e405 */
+#define ICON_MOVIE              "\xEE\x80\xAC" /* e02c */
 #define ICON_EVENT              "\xEE\xA1\xB8" /* e878 */
 #define ICON_CALENDAR_TODAY     "\xEE\xA4\xB5" /* e935 */
 #define ICON_WB_SUNNY           "\xEE\x90\xB0" /* e430 */
