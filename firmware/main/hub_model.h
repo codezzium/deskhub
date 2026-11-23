@@ -27,6 +27,7 @@ typedef struct {
     bool active;
     bool playing;
     bool can_seek;
+    bool no_controls;   // display-only source (a Plex player that can't be remote controlled)
     int pos;            // seconds
     int dur;
     uint32_t art_id;    // 0 = no cover

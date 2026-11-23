@@ -98,6 +98,7 @@ static void on_media(const cJSON *m)
     md.active = get_bool(m, "active");
     md.playing = get_bool(m, "playing");
     md.can_seek = get_bool(m, "can_seek");
+    md.no_controls = cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(m, "controls"));
     md.pos = (int)get_num(m, "pos", 0);
     md.dur = (int)get_num(m, "dur", 0);
     md.art_id = (uint32_t)get_num(m, "art_id", 0);

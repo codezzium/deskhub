@@ -11,12 +11,7 @@ Ideas for Desk Hub, roughly in order of value. Each item notes how it would work
   - **Limits:** replying from the board isn't possible with this approach. Phone Link has no supported way for other apps to send messages, so replies stay on the phone or in Phone Link. iPhone support in Phone Link is more limited than Android.
   - **Alternative for Android:** the open KDE Connect protocol could give the companion texts, battery level and "find my phone" directly, without Phone Link. It's more work and Android-only.
 
-- [ ] **Plex and Jellyfin.**
-  - **Why:** the Media page only sees what plays on this PC, through Windows' media controls. A media server knows what's playing anywhere: the TV, a phone, someone else's stream.
-  - **Approach:** the companion asks the server on the LAN. For Plex, `GET /status/sessions` on port 32400 with an `X-Plex-Token`; for Jellyfin, `GET /Sessions` with an API key made in its dashboard. Poll every few seconds while something plays, less often otherwise. Covers come from the server's own image endpoints and go to the board like today's album art. Tokens and keys go in the Windows credential store, not `config.toml`.
-  - **On the board:** the Media page and Home widget show the server's sessions when nothing plays locally (or a picker between them): title, show and episode, poster, progress, the device and user. A small "Recently added" list could go on the same page. An optional server view shows active streams and how many are transcoding.
-  - **Controls:** Jellyfin can pause, resume, seek and stop a session through `/Sessions/{id}/Playing/{command}`, so the board's buttons would work. Plex can only reach players that support remote control, which many don't, so Plex may stay display-only at first.
-  - **Setup:** a *Media servers* step that finds Plex and Jellyfin on the network (both answer local discovery), signs in to get the token or takes the API key, and tests the connection.
+- [ ] **Media server extras.** A "Recently added" list on the Media page, and a server view with active streams and how many are transcoding. A picker between the PC and the server when both play. Plex controls for players that allow remote control.
 
 - [ ] **GitHub extras.** Refresh the contribution chart soon after a `git push` from this PC instead of waiting up to 15 minutes.
 
@@ -47,6 +42,7 @@ Ideas for Desk Hub, roughly in order of value. Each item notes how it would work
 - [x] Calendar dot on the sidebar: an event still to come today, in its calendar's colour, when Home doesn't show Up next
 - [x] Readable scrolling: text that doesn't fit rests, eases slowly to its end, rests and comes back, everywhere text can overflow
 - [x] Night mode: the board goes dark or shows a clock on a schedule kept on the board, and a touch wakes it for a minute
+- [x] Plex and Jellyfin: the Media page and Home widget show the server's session when nothing plays on the PC, with poster, progress, device and user; Jellyfin sessions can be paused, skipped and seeked from the board
 - [x] Start with Windows: `deskhub-install` adds a hidden login shortcut (and `--remove` takes it away), offered as setup's last step
 - [x] Tray icon for the companion: connection status, Edit config, Run setup, Restart, Open log and Quit; the login shortcut starts it with the icon
 - [x] Firmware updates over Wi-Fi: `deskhub-flash` (and setup) send new builds to the board, which asks Install / Deny and rolls back a build that can't start; USB as the fallback

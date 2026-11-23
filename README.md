@@ -34,6 +34,7 @@ The board runs custom firmware (ESP-IDF + LVGL). A small Python app on your Wind
 - [When the PC sleeps](#when-the-pc-sleeps) and [Night mode](#night-mode)
 - [Steam](#steam) and [Games that aren't on Steam](#games-that-arent-on-steam)
 - [Internet](#internet) and [GitHub contributions](#github-contributions)
+- [Plex and Jellyfin](#plex-and-jellyfin)
 - [Customizing Home](#customizing-home)
 - [3D printer](#3d-printer)
 - [Claude Code usage](#claude-code-usage), [Codex](#codex) and [Waiting alerts](#waiting-alerts)
@@ -52,7 +53,7 @@ The board runs custom firmware (ESP-IDF + LVGL). A small Python app on your Wind
 | AI | Claude Code or Codex 5-hour and weekly limits with reset times, tokens today, a 7-day chart, usage per model | companion, from Claude Code or Codex |
 | Calendar | Up to 16 upcoming events, grouped by day, from the next 7 days or as many as you set | companion, from Google, Apple iCloud, Outlook or any ICS feed |
 | Weather | Current conditions, the next 24 hours and 6 days | the board itself, from [Open-Meteo](https://open-meteo.com) |
-| Media | Whatever Windows lists as playing (Spotify, YouTube in a browser, VLC…) with the cover, a seek bar and controls | companion |
+| Media | Whatever Windows lists as playing (Spotify, YouTube in a browser, VLC…) with the cover, a seek bar and controls; with nothing playing on the PC, what plays on your [Plex or Jellyfin server](#plex-and-jellyfin) | companion |
 | Shortcuts | Up to 16 buttons: key combos, apps, folders, URLs, volume, media, lock PC | companion |
 | 3D printer | Print state, progress, temperatures and filament colours for up to 4 printers: Bambu Lab, Klipper, Prusa, OctoPrint, Flashforge, Elegoo, Snapmaker, Anycubic, Creality (optional) | companion, over the local network (Bambu also through its cloud) |
 | Games | The Steam game you're playing with its cover and session time, your five most recent games, and a tap to launch one (optional) | companion, from Steam's local files |
@@ -145,6 +146,7 @@ uv run deskhub-setup calendar
 | `hub` | the board's address, for when `deskhub.local` doesn't work; checks that the board answers |
 | `calendar` | opens the calendar menu, then how many days ahead to show (also `calendars`, `events`) |
 | `printer` | opens the 3D printer menu (also `printers`) |
+| `media` | Plex and Jellyfin servers for the Media page (also `plex`, `jellyfin`) |
 | `games` | games that aren't on Steam, which [built-in games](#games-that-arent-on-steam) to recognise, and the Steam Web API key (also `presets`) |
 | `steam` | Steam games on or off, and the Steam Web API key |
 | `shortcuts` | the buttons on the Shortcuts page (also `tiles`) |
@@ -158,7 +160,7 @@ uv run deskhub-setup calendar
 | `flash` | builds the firmware and installs it on the board |
 | `startup` | starting the companion with Windows |
 
-Media, PC stats and the timer have nothing to set. `wifi`, `weather`, `clock` and `screen` live in the firmware, so after them setup offers to build and install it. The others change `config.toml`; restart the companion afterwards (tray icon → **Restart**) to use them. `uv run deskhub-setup --help` lists the topics too.
+PC stats and the timer have nothing to set. `wifi`, `weather`, `clock` and `screen` live in the firmware, so after them setup offers to build and install it. The others change `config.toml`; restart the companion afterwards (tray icon → **Restart**) to use them. `uv run deskhub-setup --help` lists the topics too.
 
 If setup says it can't find ESP-IDF, or the flash fails, you can flash by hand. Open PowerShell in the repo's `firmware\` folder and run these two lines, changing the path to match your ESP-IDF version and the port to match your board:
 
@@ -385,6 +387,28 @@ The companion asks GitHub's GraphQL API every 15 minutes, only while the widget 
 enabled = true
 colors = "green"   # or "accent": shades of the board's amber
 ```
+
+## Plex and Jellyfin
+
+When nothing plays on the PC, the Media page and the Home widget show what plays on your media server instead: the TV, a phone, someone else's stream. You see the title, the show and episode (or the artist, or the movie's year), the poster, progress, and which device and user it plays for. With several streams going, the one playing wins and `(+2 more)` says how many others there are. `transcoding` appears next to the server's name when the server converts the stream.
+
+```powershell
+uv run deskhub-setup media
+```
+
+Setup looks for servers on your network (both answer local discovery) and lets you type an address if yours doesn't answer. For **Plex** it opens the browser so you can approve the PC with your Plex account, or takes a token you paste. For **Jellyfin**, make an API key under *Dashboard → Administration → API Keys* and paste it. Either way setup checks the connection before it saves. Tokens and keys go in the Windows credential store; `config.toml` only gets the address:
+
+```toml
+[[media_servers]]
+type = "jellyfin"          # or "plex"
+name = "Jellyfin"
+url = "http://192.168.1.20:8096"
+
+[media]
+server_users = ["alex"]    # optional: only these accounts' streams
+```
+
+The companion asks each server every 3 seconds while something plays and every 15 seconds otherwise. A server that doesn't answer is left alone for a minute. On **Jellyfin** the board's buttons pause, resume, skip and seek the session (when the player allows remote control). **Plex** is display-only: most Plex players don't take remote commands, so the board hides the buttons.
 
 ## Customizing Home
 
@@ -704,7 +728,7 @@ The board runs a WebSocket server at `ws://deskhub.local/ws`. The companion conn
 | From the PC | Contents |
 | --- | --- |
 | `stats` | `cpu`, `ram_used`/`ram_total` (GB), `gpu`, `gpu_temp`, `vram_used`/`vram_total`, `net_down`/`net_up` (KB/s), `disk` (%), CPU and GPU names. Sent every second. |
-| `media` | `active`, `playing`, `title`, `artist`, `album`, `source`, `pos`/`dur` (seconds), `can_seek`, `art_id`. Sent every second. |
+| `media` | `active`, `playing`, `title`, `artist`, `album`, `source`, `pos`/`dur` (seconds), `can_seek`, `art_id`, and `controls` (`false` hides the buttons, for a Plex session). Sent every second. |
 | binary | `ART1`, then `u32 art_id`, `u16 width`, `u16 height` and the cover's RGB565 little-endian pixels. Sent when the cover changes. |
 | `events` | Up to 16 events with `title`, `loc`, `cal`, `start`/`end` (Unix time), `all_day`, `color`. |
 | `tiles` | Up to 16 buttons with `label`, `icon`, `color`. |

@@ -373,6 +373,135 @@ def step_printers(config_path: pathlib.Path, ask_first: bool = True):
         menu(config_path)
 
 
+def media_server_entries(config_path: pathlib.Path) -> list[dict]:
+    doc = tomlkit.parse(config_path.read_text(encoding="utf-8"))
+    return [dict(e) for e in doc.get("media_servers") or []]
+
+
+def save_media_servers(config_path: pathlib.Path, entries: list[dict]):
+    doc = tomlkit.parse(config_path.read_text(encoding="utf-8"))
+    if "media_servers" in doc:
+        del doc["media_servers"]
+    if entries:
+        aot = tomlkit.aot()
+        for e in entries:
+            t = tomlkit.table()
+            t.update(e)
+            aot.append(t)
+        doc["media_servers"] = aot
+    config_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+
+
+def plex_sign_in(wait_s: float = 180, open_url=None, sleep=None) -> str:
+    """Sign in to Plex in the browser (a PIN the user approves); returns the token or ""."""
+    import time
+    import webbrowser
+    from . import media_server as ms
+
+    try:
+        pin = ms.plex_pin()
+    except Exception as e:
+        print(f"Couldn't reach plex.tv ({e}).")
+        return ""
+    print(f"Opening Plex in your browser to approve this PC. If it doesn't open, go to:\n  {pin['url']}")
+    (open_url or webbrowser.open)(pin["url"])
+    sleep = sleep or time.sleep
+    end = time.monotonic() + wait_s
+    while time.monotonic() < end:
+        sleep(2)
+        try:
+            token = ms.plex_pin_token(pin["id"])
+        except Exception:
+            token = ""
+        if token:
+            return token
+    print("Plex sign-in timed out.")
+    return ""
+
+
+def add_media_server(config_path: pathlib.Path, found: list[dict]):
+    from . import media_server as ms
+
+    for i, f in enumerate(found, 1):
+        print(f"  {i}. {f['name']} ({'Plex' if f['type'] == 'plex' else 'Jellyfin'}) at {f['url']}")
+    pick = ask("Pick a server by number, or type its address (like http://192.168.1.20:8096)",
+               "1" if found else "")
+    if not pick:
+        return
+    if pick.isdigit() and 1 <= int(pick) <= len(found):
+        server = dict(found[int(pick) - 1])
+    else:
+        url = pick if "://" in pick else f"http://{pick}"
+        kind = ask("Plex or Jellyfin", "jellyfin" if ":8096" in url else "plex").lower()
+        if kind not in ("plex", "jellyfin"):
+            print("Type plex or jellyfin.")
+            return
+        if url.count(":") < 2:
+            url += f":{ms.PLEX_PORT if kind == 'plex' else ms.JELLYFIN_PORT}"
+        server = {"type": kind, "name": kind.title(), "url": url.rstrip("/")}
+    if server["type"] == "plex":
+        print("Plex needs a token. Sign in with your Plex account in the browser, or paste a\n"
+              "token you already have (Plex Web > a media item > Get Info > View XML: X-Plex-Token).")
+        secret = (plex_sign_in() if yes("Sign in with the browser", True)
+                  else getpass.getpass("Plex token (hidden): ").strip())
+        client = ms.PlexServer(server["url"], secret, server["name"])
+    else:
+        print("Make an API key in Jellyfin: Dashboard > Administration > API Keys > +.\n"
+              "It's kept in the Windows credential store, not in config.toml.")
+        secret = getpass.getpass("Jellyfin API key (hidden): ").strip()
+        client = ms.JellyfinServer(server["url"], secret, server["name"])
+    if not secret:
+        return
+    try:
+        sessions = client.sessions()
+    except Exception as e:
+        print(f"{server['url']} didn't accept it ({getattr(getattr(e, 'response', None), 'status_code', e)}); "
+              "not saved.")
+        return
+    ms.set_secret(server["url"], secret)
+    entries = [e for e in media_server_entries(config_path) if e.get("url", "").rstrip("/") != server["url"]]
+    entries.append({"type": server["type"], "name": server["name"], "url": server["url"]})
+    save_media_servers(config_path, entries)
+    playing = f"; {len(sessions)} playing now" if sessions else ""
+    print(f"Connected to {server['name']}{playing}. Saved.")
+
+
+def step_media_servers(config_path: pathlib.Path, ask_first: bool = True):
+    """Plex and Jellyfin: the Media page shows their sessions when nothing plays on this PC."""
+    from . import media_server as ms
+
+    heading("Media servers")
+    print("With a Plex or Jellyfin server, the Media page shows what plays anywhere (the TV,\n"
+          "a phone, someone else's stream) whenever nothing plays on this PC. Jellyfin\n"
+          "sessions can be paused and skipped from the board; Plex is display-only.")
+    if ask_first and not yes("Add or change media servers", False):
+        return
+    while True:
+        entries = media_server_entries(config_path)
+        if entries:
+            print("\nMedia servers:")
+            for i, e in enumerate(entries, 1):
+                key = "" if ms.get_secret(e.get("url", "")) else "  (no token saved)"
+                print(f"  {i}. {e.get('name', e.get('type'))} at {e.get('url')}{key}")
+        choice = ask("a = add, r = remove, Enter = done", "").lower()
+        if not choice:
+            return
+        if choice.startswith("a"):
+            print("Looking for servers on the network...")
+            known = {e.get("url", "").rstrip("/") for e in entries}
+            found = [f for f in ms.discover() if f["url"] not in known]
+            if not found:
+                print("None answered (discovery can be blocked by the firewall or another subnet).")
+            add_media_server(config_path, found)
+        elif choice.startswith("r") and entries:
+            n = ask("Remove which number", "")
+            if n.isdigit() and 1 <= int(n) <= len(entries):
+                gone = entries.pop(int(n) - 1)
+                ms.set_secret(gone.get("url", ""), None)
+                save_media_servers(config_path, entries)
+                print(f"Removed {gone.get('name', gone.get('url'))}.")
+
+
 def step_games(config_path: pathlib.Path, ask_first: bool = True):
     heading("Games")
     print("The Games page shows your Steam games by itself. Games from elsewhere, like\n"
@@ -771,6 +900,7 @@ TOPICS = {
     "hub":       ("the board's address, if deskhub.local doesn't work", ["board", "host"]),
     "calendar":  ("add, list and remove calendars, and how many days ahead", ["calendars", "events"]),
     "printer":   ("add and remove 3D printers (Bambu Lab, Klipper, Prusa, Creality...)", ["printers"]),
+    "media":     ("Plex and Jellyfin servers for the Media page", ["plex", "jellyfin", "servers"]),
     "games":     ("games that aren't on Steam, built-in games, Steam key", ["game", "presets"]),
     "steam":     ("Steam games on or off, and the Steam Web API key", []),
     "shortcuts": ("the buttons on the Shortcuts page", ["shortcut", "tiles", "buttons"]),
@@ -829,6 +959,7 @@ def run_topic(topic: str, config_path: pathlib.Path, firmware: pathlib.Path):
     steps = {
         "calendar": lambda: step_calendars(config_path, ask_first=False),
         "printer": lambda: step_printers(config_path, ask_first=False),
+        "media": lambda: step_media_servers(config_path, ask_first=False),
         "games": lambda: step_games(config_path, ask_first=False),
         "steam": lambda: step_steam(config_path),
         "hub": lambda: step_hub(config_path),
@@ -891,6 +1022,7 @@ def main():
 
     step_calendars(config_path)
     step_printers(config_path)
+    step_media_servers(config_path)
     step_games(config_path)
     step_shortcuts(config_path)
     step_pages(config_path)

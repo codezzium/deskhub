@@ -137,7 +137,7 @@ with tempfile.TemporaryDirectory() as d:
 
     # Every topic has a step behind it.
     for name in s.TOPICS:
-        check(name in s.FIRMWARE_TOPICS or name in ("calendar", "printer", "games", "steam", "hub", "shortcuts",
+        check(name in s.FIRMWARE_TOPICS or name in ("calendar", "printer", "media", "games", "steam", "hub", "shortcuts",
               "pages", "home", "display", "internet", "github", "claude", "alerts", "flash", "startup"), f"{name} runs")
 
 print("\nPROBLEMS:" if problems else "\nOK", problems if problems else "")

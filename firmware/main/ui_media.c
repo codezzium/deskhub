@@ -1,5 +1,7 @@
 // Media: whatever Windows reports as the current media session
 // (Spotify, YouTube in a browser, etc.), with cover art and controls.
+// With nothing playing on the PC, the companion may send a Plex or Jellyfin
+// session instead (display-only when "controls" is false).
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -15,7 +17,7 @@
 static lv_obj_t *s_body, *s_empty, *s_empty_sub;
 static lv_obj_t *s_art, *s_art_ph;
 static lv_obj_t *s_source, *s_title, *s_artist, *s_album;
-static lv_obj_t *s_slider, *s_pos, *s_dur, *s_play;
+static lv_obj_t *s_slider, *s_pos, *s_dur, *s_play, *s_controls;
 static int s_pos_s;
 
 static void cmd_cb(lv_event_t *e)
@@ -100,7 +102,7 @@ void media_create(lv_obj_t *page)
     lv_obj_set_style_text_align(s_dur, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_pos(s_dur, COL_X + COL_W - 80, 234);
 
-    lv_obj_t *row = lv_obj_create(s_body);
+    lv_obj_t *row = s_controls = lv_obj_create(s_body);
     lv_obj_remove_style_all(row);
     lv_obj_set_size(row, COL_W, 96);
     lv_obj_set_pos(row, COL_X, 270);
@@ -156,6 +158,8 @@ void media_refresh(void)
     lv_label_set_text(s_artist, m->artist);
     lv_label_set_text(s_album, m->album);
     lv_label_set_text(lv_obj_get_child(s_play, 0), m->playing ? ICON_PAUSE : ICON_PLAY_ARROW);
+    if (m->no_controls) lv_obj_add_flag(s_controls, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_remove_flag(s_controls, LV_OBJ_FLAG_HIDDEN);
 
     char buf[16];
     int dur = m->dur > 0 ? m->dur : 1;

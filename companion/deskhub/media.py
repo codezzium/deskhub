@@ -47,13 +47,8 @@ def _source_name(app_id: str) -> str:
     return ascii_fold(base.title(), 24) or "Media"
 
 
-def to_rgb565_frame(art_id: int, raw: bytes) -> bytes:
-    """Center-crop to a square, resize, and pack as the hub's ART1 frame."""
-    im = Image.open(io.BytesIO(raw)).convert("RGB")
-    w, h = im.size
-    side = min(w, h)
-    im = im.crop(((w - side) // 2, (h - side) // 2, (w + side) // 2, (h + side) // 2))
-    im = im.resize((ART_SIZE, ART_SIZE), Image.LANCZOS)
+def art_frame(art_id: int, im: Image.Image) -> bytes:
+    """Pack an ART_SIZE square RGB image as the hub's ART1 frame (RGB565, little endian)."""
     px = im.tobytes()
     out = bytearray(ART_SIZE * ART_SIZE * 2)
     j = 0
@@ -63,6 +58,15 @@ def to_rgb565_frame(art_id: int, raw: bytes) -> bytes:
         out[j + 1] = v >> 8
         j += 2
     return b"ART1" + struct.pack("<IHH", art_id, ART_SIZE, ART_SIZE) + bytes(out)
+
+
+def to_rgb565_frame(art_id: int, raw: bytes) -> bytes:
+    """Center-crop to a square, resize, and pack as the hub's ART1 frame."""
+    im = Image.open(io.BytesIO(raw)).convert("RGB")
+    w, h = im.size
+    side = min(w, h)
+    im = im.crop(((w - side) // 2, (h - side) // 2, (w + side) // 2, (h + side) // 2))
+    return art_frame(art_id, im.resize((ART_SIZE, ART_SIZE), Image.LANCZOS))
 
 
 class Media:

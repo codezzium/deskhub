@@ -68,6 +68,17 @@ grid = [
 # enabled = true
 # colors = "green"   # or "accent" for shades of the board's amber
 
+# Plex and Jellyfin: the Media page shows what plays on the server (the TV, a
+# phone...) whenever nothing plays on this PC. Add servers with
+# `uv run deskhub-setup media`; tokens and API keys go in the Windows credential
+# store. server_users limits it to some accounts (default: everyone's streams).
+# [[media_servers]]
+# type = "jellyfin"          # or "plex"
+# name = "Jellyfin"
+# url = "http://192.168.1.20:8096"
+# [media]
+# server_users = ["alex"]
+
 [steam]
 # Show the game you are playing and your recent Steam games, and launch them from the
 # board. Reads Steam's local files; needs Steam installed. The "games" page turns on by

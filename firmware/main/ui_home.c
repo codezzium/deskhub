@@ -1280,7 +1280,7 @@ void home_refresh_media(void)
     lv_label_set_text(s_md_title, active ? g_media.title : "Nothing playing");
     lv_label_set_text(s_md_artist, active ? g_media.artist : (g_pc_online ? "" : "PC offline"));
     lv_label_set_text(lv_obj_get_child(s_md_btn, 0), g_media.playing ? ICON_PAUSE : ICON_PLAY_ARROW);
-    if (active) lv_obj_remove_flag(s_md_btn, LV_OBJ_FLAG_HIDDEN);
+    if (active && !g_media.no_controls) lv_obj_remove_flag(s_md_btn, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(s_md_btn, LV_OBJ_FLAG_HIDDEN);
 
     if (ui_media_has_art()) {
