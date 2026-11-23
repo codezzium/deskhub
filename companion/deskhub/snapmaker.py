@@ -6,7 +6,7 @@ the touchscreen. Until someone taps Yes, `GET /api/v1/status?token=...` answers 
 that it returns the status JSON. The token is stored, and each new session starts with
 `POST /api/v1/connect` carrying it. A 401 means the printer doesn't accept the token (any more).
 
-The J1, J1s and Artisan speak SACP on port 8888 instead and aren't covered here. The Snapmaker
+The J1, J1s and Artisan speak SACP on port 8888 instead and go through snapmaker_sacp.py. The Snapmaker
 U1 runs Klipper and goes through the Moonraker backend.
 """
 import re
@@ -190,7 +190,7 @@ def probe(entry: dict, secret: str | None = None, timeout: float = 5, wait: floa
         except httpx.HTTPError as e:
             if _sacp_open(host, min(timeout, 2)):
                 return ProbeResult(False, "This looks like a Snapmaker J1, J1s or Artisan. They use "
-                                          "a different protocol (SACP), which deskhub can't read yet.")
+                                          "SACP: add it as \"Snapmaker J1 / J1s / Artisan\" instead.")
             return ProbeResult(False, f"No answer from {host_port(host, port)} ({_safe_error(e)}). "
                                       "Check the IP address on the touchscreen (Settings > Wi-Fi) "
                                       "and that the port is 8080.")
@@ -236,7 +236,7 @@ SPEC = BackendSpec(
   Turn on Wi-Fi on the touchscreen; the IP address is under Settings > Wi-Fi. While the
   connection is tested, the touchscreen asks whether to allow it: tap Yes within a minute.
   The Snapmaker U1 runs Klipper: add it as a Klipper (Moonraker) printer instead. The J1, J1s
-  and Artisan use a different protocol (SACP) that isn't supported yet.""",
+  and Artisan have their own entry: Snapmaker J1 / J1s / Artisan.""",
     default_port=DEFAULT_PORT,
     default_model="Snapmaker",
     probe=probe,

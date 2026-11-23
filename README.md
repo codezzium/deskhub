@@ -452,10 +452,11 @@ The printer page shows state, progress, time left, layer, temperatures, speed, e
 | [Flashforge](#flashforge) | Adventurer 5M / 5M Pro, AD5X; Adventurer 3/4, Creator Pro, Finder | HTTP API (newer), G-code port (older) |
 | [Elegoo](#elegoo-centauri-carbon) | Centauri Carbon | SDCP over WebSocket |
 | [Snapmaker](#snapmaker-20) | Snapmaker 2.0 A150, A250, A350 | Touchscreen Wi-Fi API |
+| [Snapmaker](#snapmaker-j1--artisan) | J1, J1s, Artisan | SACP, as Snapmaker Luban connects |
 | [Anycubic](#anycubic-lan-mode) | Kobra 3 / 3 Max, Kobra S1 / S1 Max, Kobra 4, Kobra X, with ACE Pro | LAN Mode MQTT |
 | [Creality](#creality) | K1 / K1C / K1 Max / K1 SE, K2 / K2 Plus / K2 Pro, Hi, Ender-3 V3 / V3 KE, with CFS | Creality Print's WebSocket |
 
-Not supported yet: the Snapmaker J1, J1s and Artisan (they use Snapmaker's SACP protocol), Anycubic Kobra 2 (older LAN handshake), and older Creality printers without networking (Ender-3, Ender-3 V2, CR-10...), which can go through [OctoPrint](#octoprint). Printers on Klipper or OctoPrint work whatever the brand.
+Not supported yet: the Anycubic Kobra 2 series (no LAN Mode on stock firmware: the Kobra 2 Pro, Plus and Max only talk to Anycubic's cloud, and the Kobra 2 and Neo have no network; over USB they can go through OctoPrint) and older Creality printers without networking (Ender-3, Ender-3 V2, CR-10...), which can go through [OctoPrint](#octoprint). Printers on Klipper or OctoPrint work whatever the brand.
 
 Setup offers a *3D printers* step. You can also run it on its own, pick the brand from the menu, then restart the companion:
 
@@ -563,6 +564,22 @@ Elegoo printers on Klipper (Neptune 4 series) go through [Moonraker](#klipper-mo
 ### Snapmaker 2.0
 
 For the A150, A250 and A350. Turn on Wi-Fi on the touchscreen, choose *Snapmaker 2.0* and enter its IP address. While setup tests the connection, the touchscreen asks whether to allow it: tap **Yes** within a minute. The token it hands out goes into Windows Credential Manager. Laser and CNC jobs show their state and progress without temperatures. The Snapmaker U1 runs Klipper, so add it as a [Klipper printer](#klipper-moonraker).
+
+### Snapmaker J1 / Artisan
+
+For the J1, J1s and Artisan. On the touchscreen, turn on **Allow Remote Connection** in the settings, under *Remote Connection*, then choose *Snapmaker J1 / J1s / Artisan* and enter the printer's IP address. While setup tests the connection, the touchscreen asks whether to let this PC connect: tap **Connect** within a minute. The companion connects the way Snapmaker Luban does, on port 8888, and keeps the token it made in Windows Credential Manager. With *Remote Connection* set to *Only the first time*, the printer remembers it and doesn't ask again; set to *Always*, it asks each time the companion reconnects.
+
+Shows state, file, the nozzle in use (left or right) and its temperature, bed temperature, the print speed and the printer's error messages. Progress and time left show only where the printer reports the job's line count, which current J1 firmware doesn't, so on a J1 they stay empty. Laser and CNC jobs on the Artisan show their state and file without temperatures, with progress on the same terms. Filament colours don't show: the printer doesn't report them over this connection.
+
+The printer takes one remote connection at a time, so disconnect Luban (or close it) while the companion is connected, and the other way round. If the companion can't get an answer (Luban is connected, or an old prompt is still on the screen), it tries again after a minute, then less often. Tap **Refuse** on any prompt left on the touchscreen to clear it. Tapping **Disconnect** on the touchscreen ends the companion's connection too, and it stays away for 15 minutes before connecting again. Keep **Safe Mode** off: with it on, the touchscreen locks while anything is connected.
+
+```toml
+[[printers]]
+name = "Snapmaker J1"
+type = "snapmaker-sacp"
+host = "192.168.1.75"
+model = "J1"            # optional, shown on the board
+```
 
 ### Anycubic (LAN Mode)
 

@@ -12,6 +12,7 @@ BACKENDS = {
     "flashforge": "flashforge",
     "elegoo": "elegoo",
     "snapmaker": "snapmaker",
+    "snapmaker-sacp": "snapmaker_sacp",
     "anycubic": "anycubic",
     "creality": "creality",
 }
