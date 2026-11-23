@@ -42,7 +42,7 @@ Ideas for Desk Hub, roughly in order of value. Each item notes how it would work
 - [x] Calendar dot on the sidebar: an event still to come today, in its calendar's colour, when Home doesn't show Up next
 - [x] Readable scrolling: text that doesn't fit rests, eases slowly to its end, rests and comes back, everywhere text can overflow
 - [x] Night mode: the board goes dark or shows a clock on a schedule kept on the board, and a touch wakes it for a minute
-- [x] Plex and Jellyfin: the Media page splits into this PC and the server, with the server's session (poster, progress, device and user) or its library and version while nothing plays; Jellyfin sessions can be paused, skipped and seeked from the board
+- [x] Plex and Jellyfin: the Media page splits into this PC (left) and the server (right), with the server's session (poster, progress, device and user) or its library and version while nothing plays; Jellyfin sessions can be paused, skipped and seeked from the board
 - [x] Start with Windows: `deskhub-install` adds a hidden login shortcut (and `--remove` takes it away), offered as setup's last step
 - [x] Tray icon for the companion: connection status, Edit config, Run setup, Restart, Open log and Quit; the login shortcut starts it with the icon
 - [x] Firmware updates over Wi-Fi: `deskhub-flash` (and setup) send new builds to the board, which asks Install / Deny and rolls back a build that can't start; USB as the fallback

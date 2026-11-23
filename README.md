@@ -390,7 +390,7 @@ colors = "green"   # or "accent": shades of the board's amber
 
 ## Plex and Jellyfin
 
-With a media server set up, the Media page splits in two: this PC on top, the server below. The server card shows what plays anywhere (the TV, a phone, someone else's stream): the poster, the title, the show and episode (or the artist, or the movie's year), progress, and which device and user it plays for. With several streams going, the one playing wins and `(+2 more)` says how many others there are. `transcoding` appears next to the server's name when the server converts the stream. While nothing plays, the card says so and shows the server's library (`312 movies, 45 shows, 2,104 episodes`) and version. The Home media widget shows the PC, or the server's session while the PC is idle.
+With a media server set up, the Media page splits in two: this PC on the left, the server on the right. The server card shows what plays anywhere (the TV, a phone, someone else's stream): the poster, the title, the show and episode (or the artist, or the movie's year), progress, and which device and user it plays for. With several streams going, the one playing wins and `(+2 more)` says how many others there are. `transcoding` appears next to the server's name when the server converts the stream. While nothing plays, the card says so and shows the server's library (`312 movies, 45 shows, 2,104 episodes`) and version. The Home media widget shows the PC, or the server's session while the PC is idle.
 
 ```powershell
 uv run deskhub-setup media

@@ -1,7 +1,7 @@
 // Media: whatever Windows reports as the current media session
 // (Spotify, YouTube in a browser, etc.), with cover art and controls.
-// With a Plex or Jellyfin server set up, the page splits: this PC on top, the
-// server below (its session, or the server and its library while nothing plays).
+// With a Plex or Jellyfin server set up, the page splits: this PC on the left,
+// the server on the right (its session, or the server and its library while nothing plays).
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -40,11 +40,14 @@ static void seek_cb(lv_event_t *e)
     }
 }
 
-// ---- split view: this PC on top, the media server below -------------------
-// Shown once the companion says a Plex or Jellyfin server is set up.
+// ---- split view: this PC on the left, the media server on the right --------
+// Shown once the companion says a Plex or Jellyfin server is set up. Each card:
+// the cover with the text beside it, the progress bar under, then the buttons.
+// The block is centred in the card's height, so a card without buttons (Plex)
+// or with nothing playing doesn't leave an empty band at the bottom.
 
-#define ROW_GAP 12
-#define BTN_W (44 + 56 + 44 + 2 * 10)
+#define CARD_GAP 12
+#define TRACK_COL 0x3a3f49   // progress track: visible on a card
 
 typedef struct {
     bool server;
@@ -52,7 +55,8 @@ typedef struct {
     lv_obj_t *source, *title, *artist, *album;
     lv_obj_t *slider, *pos, *dur, *controls, *play;
     int pos_s;
-    int tx, tw_btn, tw_full;   // text column: x, and width beside the buttons or without them
+    int inner_w, inner_h, art_w, art_h, tx;
+    int layout;   // -1 none yet, else bit 0 progress, bit 1 buttons, bit 2 idle
 } media_row_t;
 
 static lv_obj_t *s_split;
@@ -83,24 +87,39 @@ static void row_seek_cb(lv_event_t *e)
 
 static lv_obj_t *row_button(media_row_t *r, int size, uint32_t bg, const char *glyph, const char *cmd)
 {
-    lv_obj_t *b = ui_round_button(r->controls, size, bg, size > 48 ? g_icon_32 : g_icon_24, glyph, row_cmd_cb,
+    lv_obj_t *b = ui_round_button(r->controls, size, bg, size > 56 ? g_icon_48 : g_icon_32, glyph, row_cmd_cb,
                                   (void *)cmd);
     lv_obj_set_user_data(b, r);
     return b;
 }
 
-static void row_create(media_row_t *r, bool server, int y, int h)
+static void style_track(lv_obj_t *slider)
 {
-    int inner_w = CONTENT_W - 34, inner_h = h - 34;
-    int art_h = inner_h, art_w = server ? inner_h * 2 / 3 : inner_h;
-    int tx = art_w + 18, tw = inner_w - tx - BTN_W - 16;
+    lv_obj_set_style_bg_color(slider, lv_color_hex(TRACK_COL), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(slider, lv_color_hex(COL_TEXT), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(slider, lv_color_hex(COL_TEXT), LV_PART_KNOB);
+    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_KNOB);
+}
+
+static void row_create(media_row_t *r, bool server, int x, int w, int h)
+{
+    int inner_w = w - 34, inner_h = h - 34;
+    int art_h = inner_w * 45 / 100;
+    if (art_h > 150) art_h = 150;
+    int art_w = server ? art_h * 2 / 3 : art_h;
+    int tx = art_w + 14, tw = inner_w - tx;
     r->server = server;
+    r->inner_w = inner_w;
+    r->inner_h = inner_h;
+    r->art_w = art_w;
+    r->art_h = art_h;
     r->tx = tx;
-    r->tw_btn = tw;
-    r->tw_full = inner_w - tx;
+    r->layout = -1;
     r->card = ui_card(s_split);
-    lv_obj_set_size(r->card, CONTENT_W, h);
-    lv_obj_set_pos(r->card, 0, y);
+    lv_obj_set_size(r->card, w, h);
+    lv_obj_set_pos(r->card, x, 0);
     lv_obj_remove_flag(r->card, LV_OBJ_FLAG_CLICKABLE);
 
     r->art_ph = lv_obj_create(r->card);
@@ -124,55 +143,97 @@ static void row_create(media_row_t *r, bool server, int y, int h)
     lv_image_set_inner_align(r->art, LV_IMAGE_ALIGN_STRETCH);
     lv_obj_add_flag(r->art, LV_OBJ_FLAG_HIDDEN);
 
-    // Text block centred in the card's height when there's room to spare.
-    int ty = inner_h > 146 ? (inner_h - 146) / 2 : 0;
     r->source = ui_label(r->card, g_font_14, COL_ACCENT, "");
-    lv_obj_set_pos(r->source, tx, ty);
     lv_obj_set_width(r->source, tw);
     lv_label_set_long_mode(r->source, LV_LABEL_LONG_DOT);
     r->title = ui_label(r->card, g_font_24, COL_TEXT, "");
     ui_marquee(r->title);
     lv_obj_set_width(r->title, tw);
-    lv_obj_set_pos(r->title, tx, ty + 20);
     r->artist = ui_label(r->card, g_font_16, COL_TEXT, "");
     ui_marquee(r->artist);
     lv_obj_set_width(r->artist, tw);
-    lv_obj_set_pos(r->artist, tx, ty + 54);
     r->album = ui_label(r->card, g_font_14, COL_MUTED, "");
     ui_marquee(r->album);
     lv_obj_set_width(r->album, tw);
-    lv_obj_set_pos(r->album, tx, ty + 78);
 
     r->slider = lv_slider_create(r->card);
-    lv_obj_set_size(r->slider, tw - 12, 6);
-    lv_obj_set_pos(r->slider, tx + 6, ty + 110);
+    lv_obj_set_size(r->slider, inner_w - 12, 6);
     lv_slider_set_range(r->slider, 0, 1);
-    lv_obj_set_style_bg_color(r->slider, lv_color_hex(COL_CARD_HI), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(r->slider, lv_color_hex(COL_TEXT), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(r->slider, lv_color_hex(COL_TEXT), LV_PART_KNOB);
+    style_track(r->slider);
     lv_obj_set_style_pad_all(r->slider, 5, LV_PART_KNOB);
     lv_obj_set_ext_click_area(r->slider, 16);
     lv_obj_add_event_cb(r->slider, row_seek_cb, LV_EVENT_VALUE_CHANGED, r);
     lv_obj_add_event_cb(r->slider, row_seek_cb, LV_EVENT_RELEASED, r);
     r->pos = ui_label(r->card, g_font_14, COL_MUTED, "0:00");
-    lv_obj_set_pos(r->pos, tx, ty + 124);
     r->dur = ui_label(r->card, g_font_14, COL_MUTED, "");
     lv_obj_set_width(r->dur, 80);
     lv_obj_set_style_text_align(r->dur, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_pos(r->dur, tx + tw - 80, ty + 124);
 
     r->controls = lv_obj_create(r->card);
     lv_obj_remove_style_all(r->controls);
-    lv_obj_set_size(r->controls, BTN_W, 60);
-    lv_obj_align(r->controls, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_size(r->controls, inner_w, 68);
     lv_obj_set_flex_flow(r->controls, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(r->controls, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(r->controls, 10, 0);
+    lv_obj_set_style_pad_column(r->controls, 20, 0);
     lv_obj_remove_flag(r->controls, LV_OBJ_FLAG_SCROLLABLE);
-    row_button(r, 44, COL_CARD_HI, ICON_SKIP_PREVIOUS, "prev");
-    r->play = row_button(r, 56, COL_TEXT, ICON_PLAY_ARROW, "toggle");
+    row_button(r, 52, COL_CARD_HI, ICON_SKIP_PREVIOUS, "prev");
+    r->play = row_button(r, 68, COL_TEXT, ICON_PLAY_ARROW, "toggle");
     lv_obj_set_style_text_color(lv_obj_get_child(r->play, 0), lv_color_hex(COL_BG), 0);
-    row_button(r, 44, COL_CARD_HI, ICON_SKIP_NEXT, "next");
+    row_button(r, 52, COL_CARD_HI, ICON_SKIP_NEXT, "next");
+
+    // The rest is placed by row_layout().
+    lv_obj_set_x(r->slider, 6);
+    lv_obj_set_x(r->pos, 0);
+    lv_obj_set_x(r->dur, inner_w - 80);
+    lv_obj_set_x(r->controls, 0);
+}
+
+// Place everything for what the card shows now, centred in its height.
+static void row_layout(media_row_t *r, bool progress, bool buttons, bool idle)
+{
+    int layout = (progress ? 1 : 0) | (buttons ? 2 : 0) | (idle ? 4 : 0);
+    if (layout == r->layout) return;
+    r->layout = layout;
+    int a = r->art_h;
+    lv_obj_t *text[4] = {r->source, r->title, r->artist, r->album};
+    if (idle) {
+        // Nothing playing: the placeholder centred on top, the lines centred under it.
+        int y = (r->inner_h - (a + 16 + 100)) / 2;
+        if (y < 0) y = 0;
+        int ax = (r->inner_w - r->art_w) / 2;
+        lv_obj_set_pos(r->art_ph, ax, y);
+        lv_obj_set_pos(r->frame, ax, y);
+        static const int dy[4] = {0, 20, 54, 80};
+        for (int i = 0; i < 4; i++) {
+            lv_obj_set_width(text[i], r->inner_w);
+            lv_obj_set_style_text_align(text[i], LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_set_pos(text[i], 0, y + a + 16 + dy[i]);
+        }
+        return;
+    }
+    for (int i = 0; i < 4; i++) {
+        lv_obj_set_width(text[i], r->inner_w - r->tx);
+        lv_obj_set_style_text_align(text[i], LV_TEXT_ALIGN_LEFT, 0);
+        lv_obj_set_x(text[i], r->tx);
+    }
+    lv_obj_set_x(r->art_ph, 0);
+    lv_obj_set_x(r->frame, 0);
+    int block = a + (progress ? 56 : 0) + (buttons ? 84 : 0);
+    int y = (r->inner_h - block) / 2;
+    if (y < 0) y = 0;
+    lv_obj_set_y(r->art_ph, y);
+    lv_obj_set_y(r->frame, y);
+    // Text beside the cover, centred on it.
+    int ty = y + (a - 100) / 2;
+    lv_obj_set_y(r->source, ty);
+    lv_obj_set_y(r->title, ty + 20);
+    lv_obj_set_y(r->artist, ty + 54);
+    lv_obj_set_y(r->album, ty + 80);
+    int py = y + a + 24;
+    lv_obj_set_y(r->slider, py);
+    lv_obj_set_y(r->pos, py + 14);
+    lv_obj_set_y(r->dur, py + 14);
+    lv_obj_set_y(r->controls, y + a + (progress ? 56 : 0) + 16);
 }
 
 static void show(lv_obj_t *o, bool on)
@@ -196,7 +257,7 @@ static void set_text(lv_obj_t *label, const char *text)
     if (strcmp(lv_label_get_text(label), text) != 0) lv_label_set_text(label, text);
 }
 
-// Fill a row with a session, or with `idle_*` lines when nothing plays.
+// Fill a card with a session, or with `idle_*` lines when nothing plays.
 static void row_fill(media_row_t *r, const hub_media_t *m, const char *source,
                      const char *idle_title, const char *idle_sub, const char *idle_small)
 {
@@ -210,21 +271,12 @@ static void row_fill(media_row_t *r, const hub_media_t *m, const char *source,
     set_text(r->album, on ? m->album : idle_small);
     lv_obj_set_style_text_color(r->title, lv_color_hex(on ? COL_TEXT : COL_MUTED), 0);
     lv_obj_set_style_text_color(r->artist, lv_color_hex(on ? COL_TEXT : COL_MUTED), 0);
-    show(r->slider, on && m->dur > 0);
-    show(r->pos, on && m->dur > 0);
-    show(r->dur, on && m->dur > 0);
-    bool buttons = on && !m->no_controls;
+    bool progress = on && m->dur > 0, buttons = on && !m->no_controls;
+    show(r->slider, progress);
+    show(r->pos, progress);
+    show(r->dur, progress);
     show(r->controls, buttons);
-    // Without buttons the text and progress bar take the whole width.
-    int w = buttons ? r->tw_btn : r->tw_full;
-    if (lv_obj_get_style_width(r->title, 0) != w) {
-        lv_obj_set_width(r->source, w);
-        lv_obj_set_width(r->title, w);
-        lv_obj_set_width(r->artist, w);
-        lv_obj_set_width(r->album, w);
-        lv_obj_set_width(r->slider, w - 12);
-        lv_obj_set_x(r->dur, r->tx + w - 80);
-    }
+    row_layout(r, progress, buttons, !on);
     if (!on) return;
     lv_label_set_text(lv_obj_get_child(r->play, 0), m->playing ? ICON_PAUSE : ICON_PLAY_ARROW);
     char buf[16];
@@ -253,9 +305,9 @@ static void split_create(lv_obj_t *page)
     lv_obj_remove_style_all(s_split);
     lv_obj_set_size(s_split, LV_PCT(100), LV_PCT(100));
     lv_obj_remove_flag(s_split, LV_OBJ_FLAG_SCROLLABLE);
-    int h = (CONTENT_H - ROW_GAP) / 2;
-    row_create(&s_rows[0], false, 0, h);
-    row_create(&s_rows[1], true, h + ROW_GAP, CONTENT_H - h - ROW_GAP);
+    int w = (CONTENT_W - CARD_GAP) / 2;
+    row_create(&s_rows[0], false, 0, w, CONTENT_H);
+    row_create(&s_rows[1], true, w + CARD_GAP, CONTENT_W - w - CARD_GAP, CONTENT_H);
     lv_obj_add_flag(s_split, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -341,9 +393,7 @@ void media_create(lv_obj_t *page)
     lv_obj_set_size(s_slider, COL_W - 16, 8);
     lv_obj_set_pos(s_slider, COL_X + 8, 214);
     lv_slider_set_range(s_slider, 0, 1);
-    lv_obj_set_style_bg_color(s_slider, lv_color_hex(COL_CARD_HI), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(s_slider, lv_color_hex(COL_TEXT), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(s_slider, lv_color_hex(COL_TEXT), LV_PART_KNOB);
+    style_track(s_slider);
     lv_obj_set_style_pad_all(s_slider, 6, LV_PART_KNOB);
     lv_obj_set_ext_click_area(s_slider, 20);
     lv_obj_add_event_cb(s_slider, seek_cb, LV_EVENT_VALUE_CHANGED, NULL);
