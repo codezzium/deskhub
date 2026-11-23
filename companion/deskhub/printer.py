@@ -65,7 +65,7 @@ def _num(v) -> float | None:
         return None
     try:
         f = round(float(v), 1)
-    except ValueError:
+    except (ValueError, OverflowError):
         return None
     return int(f) if f.is_integer() else f
 

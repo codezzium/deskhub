@@ -13,6 +13,7 @@ BACKENDS = {
     "elegoo": "elegoo",
     "snapmaker": "snapmaker",
     "anycubic": "anycubic",
+    "creality": "creality",
 }
 
 

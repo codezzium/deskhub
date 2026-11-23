@@ -54,7 +54,7 @@ The board runs custom firmware (ESP-IDF + LVGL). A small Python app on your Wind
 | Weather | Current conditions, the next 24 hours and 6 days | the board itself, from [Open-Meteo](https://open-meteo.com) |
 | Media | Whatever Windows lists as playing (Spotify, YouTube in a browser, VLC…) with the cover, a seek bar and controls | companion |
 | Shortcuts | Up to 16 buttons: key combos, apps, folders, URLs, volume, media, lock PC | companion |
-| 3D printer | Print state, progress, temperatures and filament colours for up to 4 printers: Bambu Lab, Klipper, Prusa, OctoPrint, Flashforge, Elegoo, Snapmaker, Anycubic (optional) | companion, over the local network (Bambu also through its cloud) |
+| 3D printer | Print state, progress, temperatures and filament colours for up to 4 printers: Bambu Lab, Klipper, Prusa, OctoPrint, Flashforge, Elegoo, Snapmaker, Anycubic, Creality (optional) | companion, over the local network (Bambu also through its cloud) |
 | Games | The Steam game you're playing with its cover and session time, your five most recent games, and a tap to launch one (optional) | companion, from Steam's local files |
 | Stats: Internet view | Online status, latency, jitter and packet loss with a one-minute chart, uptime and the last drop, data used today and this month, and an on-demand speed test | companion |
 | Timer | Countdown with presets from 1 to 45 minutes, pause and reset, and a full-screen "Time's up" card. The time left shows on its sidebar tab | the board itself, works without the PC |
@@ -453,8 +453,9 @@ The printer page shows state, progress, time left, layer, temperatures, speed, e
 | [Elegoo](#elegoo-centauri-carbon) | Centauri Carbon | SDCP over WebSocket |
 | [Snapmaker](#snapmaker-20) | Snapmaker 2.0 A150, A250, A350 | Touchscreen Wi-Fi API |
 | [Anycubic](#anycubic-lan-mode) | Kobra 3 / 3 Max, Kobra S1 / S1 Max, Kobra 4, Kobra X, with ACE Pro | LAN Mode MQTT |
+| [Creality](#creality) | K1 / K1C / K1 Max / K1 SE, K2 / K2 Plus / K2 Pro, Hi, Ender-3 V3 / V3 KE, with CFS | Creality Print's WebSocket |
 
-Not supported yet: the Snapmaker J1, J1s and Artisan (they use Snapmaker's SACP protocol), Anycubic Kobra 2 (older LAN handshake), and Creality printers on stock firmware without Moonraker. Printers on Klipper or OctoPrint work whatever the brand.
+Not supported yet: the Snapmaker J1, J1s and Artisan (they use Snapmaker's SACP protocol), Anycubic Kobra 2 (older LAN handshake), and older Creality printers without networking (Ender-3, Ender-3 V2, CR-10...), which can go through [OctoPrint](#octoprint). Printers on Klipper or OctoPrint work whatever the brand.
 
 Setup offers a *3D printers* step. You can also run it on its own, pick the brand from the menu, then restart the companion:
 
@@ -566,6 +567,20 @@ For the A150, A250 and A350. Turn on Wi-Fi on the touchscreen, choose *Snapmaker
 ### Anycubic (LAN Mode)
 
 For the Kobra 3 / 3 Max, Kobra S1 / S1 Max, Kobra 4 and Kobra X on stock firmware. Turn on **LAN Mode** (*Settings → Network → LAN Mode*), choose *Anycubic (LAN Mode)* and enter the printer's IP address. No password: the companion asks the printer for its login each time it connects. ACE Pro slot colours show on the board, with the slot in use highlighted. LAN Mode takes the printer out of Anycubic's cloud and app until you pair it again.
+
+### Creality
+
+For the K1 / K1C / K1 Max / K1 SE, K2 / K2 Plus / K2 Pro, Hi and Ender-3 V3 / V3 KE on stock firmware. Choose *Creality (stock firmware)* and enter the printer's IP address (*Settings → Network* on the printer, or tap the connected Wi-Fi network). Nothing else is needed: no password, no root, no developer mode. The companion connects the way Creality Print does, on port 9999. Setup suggests the printer's host name as its name and reads the model. Shows state, progress, layers, time left, file, nozzle, bed and chamber temperatures, the print speed and print errors. On a printer with a CFS, the slot colours and materials show on the board, with the slot in use highlighted; the external spool holder follows the CFS slots. The start-of-print self-test shows as preparing.
+
+```toml
+[[printers]]
+name = "K2 Pro"
+type = "creality"
+host = "192.168.1.74"
+model = "K2 Pro"        # optional, shown on the board
+```
+
+A rooted K1 or a K2 with Moonraker turned on can also go through [Moonraker](#klipper-moonraker), but this way needs neither. The Sonic Pad isn't covered: nothing we found confirms it offers this connection.
 
 ## Claude Code usage
 

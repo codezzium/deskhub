@@ -367,7 +367,7 @@ def step_calendars(config_path: pathlib.Path, ask_first: bool = True):
 def step_printers(config_path: pathlib.Path, ask_first: bool = True):
     heading("3D printers")
     print("Show the status of 3D printers on the board: Bambu Lab (A1, P1, X1, H2D) and\n"
-          "Klipper, Prusa, OctoPrint, Flashforge, Elegoo, Snapmaker and Anycubic printers.")
+          "Klipper, Prusa, OctoPrint, Flashforge, Elegoo, Snapmaker, Anycubic and Creality printers.")
     if not ask_first or yes("Add or change 3D printers", False):
         from .printers_cli import menu
         menu(config_path)
@@ -770,7 +770,7 @@ TOPICS = {
     "screen":    ("turn the screen off after idle minutes (rebuilds the firmware)", ["timeout"]),
     "hub":       ("the board's address, if deskhub.local doesn't work", ["board", "host"]),
     "calendar":  ("add, list and remove calendars, and how many days ahead", ["calendars", "events"]),
-    "printer":   ("add and remove 3D printers (Bambu Lab, Klipper, Prusa, OctoPrint...)", ["printers"]),
+    "printer":   ("add and remove 3D printers (Bambu Lab, Klipper, Prusa, Creality...)", ["printers"]),
     "games":     ("games that aren't on Steam, built-in games, Steam key", ["game", "presets"]),
     "steam":     ("Steam games on or off, and the Steam Web API key", []),
     "shortcuts": ("the buttons on the Shortcuts page", ["shortcut", "tiles", "buttons"]),

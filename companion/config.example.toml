@@ -271,3 +271,4 @@ pc_sleep = "off"
 #   type = "elegoo"      Centauri Carbon, port 3030, nothing else
 #   type = "snapmaker"   Snapmaker 2.0, port 8080; token in the credential store
 #   type = "anycubic"    LAN Mode, port 18910, nothing else
+#   type = "creality"    K1, K2, Hi, Ender-3 V3 on stock firmware, port 9999, nothing else
