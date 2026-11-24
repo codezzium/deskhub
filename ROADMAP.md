@@ -15,6 +15,12 @@ Ideas for Desk Hub, roughly in order of value. Each item notes how it would work
 
 - [ ] **GitHub extras.** Refresh the contribution chart soon after a `git push` from this PC instead of waiting up to 15 minutes.
 
+- [ ] **Flight tracker.**
+  - **Overhead:** planes near home, from ADS-B data. The companion polls a free feed such as adsb.lol or OpenSky for a box around the configured location, or reads a local receiver (readsb/dump1090 on a Raspberry Pi with an RTL-SDR stick) when one is set up. Flight number, airline, aircraft type, altitude, speed, heading and distance, with route (origin → destination) looked up by callsign.
+  - **Following a flight:** enter a flight number (in setup, or from a calendar event that has one) to follow it from gate to gate: departure and arrival times with delays, a progress bar along the route and time to landing. Handy for picking someone up.
+  - **On the board:** a Flights page with a small radar-style map of nearby planes and a list sorted by distance, and a Home widget with the closest plane or the flight being followed. A brief pop-up when a plane passes close overhead, with a configurable radius and altitude.
+  - **Limits:** free feeds are rate-limited, so polling slows down when the page isn't shown. Route lookups for small or private aircraft are often missing. Delay and gate data for followed flights needs an API key from a flight-status service (AeroDataBox or similar).
+
 ## Day-to-day polish
 
 - [ ] **Configurator UI on the PC.** A settings window instead of editing `config.toml` and answering setup questions in a terminal.
