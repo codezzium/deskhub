@@ -72,6 +72,23 @@ def _epoch(iso: str | None) -> int | None:
         return None
 
 
+def weekly_limits(limits: object, now: float) -> list[dict]:
+    out = []
+    for item in limits if isinstance(limits, list) else []:
+        if not isinstance(item, dict) or item.get("group") != "weekly":
+            continue
+        pct, reset = item.get("percent"), _epoch(item.get("resets_at"))
+        if not isinstance(pct, (int, float)) or not reset or reset <= now:
+            continue
+        if item.get("kind") == "weekly_all":
+            name = "HAFTALIK"
+        else:
+            model = ((item.get("scope") or {}).get("model") or {}).get("display_name") or "MODEL"
+            name = str(model).upper()
+        out.append({"name": name[:15], "pct": round(float(pct), 1), "reset": reset})
+    return out[:3]
+
+
 class LiveLimits:
     def __init__(self, path: pathlib.Path = CREDENTIALS, renew=None):
         self.path = path
@@ -167,6 +184,9 @@ class LiveLimits:
             pct, reset = w.get("utilization"), _epoch(w.get("resets_at"))
             if isinstance(pct, (int, float)) and reset and reset > now:
                 out[name] = {"pct": round(float(pct), 1), "reset": reset}
+        weekly = weekly_limits(data.get("limits"), now)
+        if weekly:
+            out["weekly"] = weekly
         if out:
             out["updated"] = int(now)
             self._note("ok", "receiving live limits")

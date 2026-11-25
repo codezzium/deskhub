@@ -4,15 +4,22 @@
 #include <math.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include "board.h"
 #include "cJSON.h"
+#include "driver/uart.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_lcd_panel_rgb.h"
 #include "display.h"
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_system.h"
+#include "esp_wifi.h"
+#include "lvgl.h"
 #include "esp_timer.h"
 #include "hub_model.h"
 #include "net.h"
@@ -26,6 +33,10 @@ static const char *TAG = "server";
 #define ONLINE_TIMEOUT_MS 5000
 #define PREAUTH_MAX 256
 #define ART_MAGIC "ART1"
+#define SERIAL_FD 0x7ffe
+#define SERIAL_UART UART_NUM_0
+#define SERIAL_BAUD 460800
+#define SERIAL_LINE_MAX (64 * 1024)
 
 static httpd_handle_t s_server;
 static volatile int s_client = -1;
@@ -70,8 +81,21 @@ static uint32_t get_color(const cJSON *obj, const char *key, uint32_t fallback)
 
 // ---- message handlers ------------------------------------------------------
 
+static void sync_clock(const cJSON *m)
+{
+    double pc = get_num(m, "now", 0);
+    if (pc < 1700000000) return;
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    if (fabs(pc - (double)tv.tv_sec) >= 2) {
+        struct timeval set = {.tv_sec = (time_t)pc, .tv_usec = 0};
+        settimeofday(&set, NULL);
+    }
+}
+
 static void on_stats(const cJSON *m)
 {
+    sync_clock(m);
     hub_stats_t s = {0};
     s.cpu = get_num(m, "cpu", 0);
     s.cpu_temp = get_num(m, "cpu_temp", -1);
@@ -85,6 +109,15 @@ static void on_stats(const cJSON *m)
     s.net_down = get_num(m, "net_down", 0);
     s.net_up = get_num(m, "net_up", 0);
     s.disk = get_num(m, "disk", 0);
+    s.disk_read = get_num(m, "disk_read", 0);
+    s.disk_write = get_num(m, "disk_write", 0);
+    s.disk_temp = get_num(m, "disk_temp", -1);
+    s.has_gpu2 = cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(m, "gpu2"));
+    s.gpu2 = get_num(m, "gpu2", 0);
+    s.gpu2_temp = get_num(m, "gpu2_temp", -1);
+    s.vram2_used = get_num(m, "vram2_used", 0);
+    s.vram2_total = get_num(m, "vram2_total", 0);
+    copy_str(s.gpu2_name, sizeof(s.gpu2_name), m, "gpu2_name");
     copy_str(s.cpu_name, sizeof(s.cpu_name), m, "cpu_name");
     copy_str(s.gpu_name, sizeof(s.gpu_name), m, "gpu_name");
     display_lock();
@@ -193,6 +226,14 @@ static void on_claude(const cJSON *m)
     const cJSON *w5 = cJSON_GetObjectItemCaseSensitive(limits, "five_hour");
     const cJSON *w7 = cJSON_GetObjectItemCaseSensitive(limits, "seven_day");
     c.limits_updated = (time_t)get_num(limits, "updated", 0);
+    const cJSON *wk;
+    cJSON_ArrayForEach(wk, cJSON_GetObjectItemCaseSensitive(limits, "weekly")) {
+        if (c.weekly_count >= HUB_CLAUDE_WEEKLY) break;
+        copy_str(c.weekly_name[c.weekly_count], sizeof(c.weekly_name[0]), wk, "name");
+        c.weekly_pct[c.weekly_count] = get_num(wk, "pct", 0);
+        c.weekly_reset[c.weekly_count] = (time_t)get_num(wk, "reset", 0);
+        c.weekly_count++;
+    }
     if (cJSON_IsObject(w5)) {
         c.has_5h = true;
         c.pct_5h = get_num(w5, "pct", 0);
@@ -543,6 +584,33 @@ static void on_alert(const cJSON *m)
     display_unlock();
 }
 
+static void on_wifi_test(const cJSON *m)
+{
+    int bw = (int)get_num(m, "bw", 0);
+    if (bw == 20) esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20);
+    else if (bw == 40) esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT40);
+    const cJSON *render = cJSON_GetObjectItemCaseSensitive(m, "render");
+    if (cJSON_IsBool(render)) {
+        display_lock();
+        lv_display_enable_invalidation(NULL, cJSON_IsTrue(render));
+        display_unlock();
+    }
+    const cJSON *bssid = cJSON_GetObjectItemCaseSensitive(m, "bssid");
+    if (cJSON_IsString(bssid) && bssid->valuestring) {
+        unsigned b[6];
+        uint8_t mac[6];
+        if (sscanf(bssid->valuestring, "%x:%x:%x:%x:%x:%x", &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]) == 6) {
+            for (int i = 0; i < 6; i++) mac[i] = (uint8_t)b[i];
+            net_set_pin(mac);
+        } else {
+            net_set_pin(NULL);
+        }
+    }
+    wifi_bandwidth_t cur = 0;
+    esp_wifi_get_bandwidth(WIFI_IF_STA, &cur);
+    ESP_LOGI(TAG, "wifi_test bw=%d", (int)cur);
+}
+
 static void on_text(int fd, char *text)
 {
     cJSON *m = cJSON_Parse(text);
@@ -570,6 +638,10 @@ static void on_text(int fd, char *text)
         }
     } else if (fd != s_client) {
         // Ignore everything from sockets that have not said hello.
+        if (fd == SERIAL_FD) {
+            static const char need[] = "{\"type\":\"hello_needed\"}\n";
+            uart_write_bytes(SERIAL_UART, need, sizeof(need) - 1);
+        }
     } else {
         s_last_rx_ms = now_ms();
         if (strcmp(type, "stats") == 0) on_stats(m);
@@ -584,6 +656,7 @@ static void on_text(int fd, char *text)
         else if (strcmp(type, "home") == 0) on_home(m);
         else if (strcmp(type, "alert") == 0) on_alert(m);
         else if (strcmp(type, "tile_state") == 0) on_tile_state(m);
+        else if (strcmp(type, "wifi_test") == 0) on_wifi_test(m);
         else if (strcmp(type, "steam") == 0) on_steam(m);
         else if (strcmp(type, "net") == 0) on_net(m);
         else if (strcmp(type, "github") == 0) on_github(m);
@@ -824,6 +897,11 @@ void hub_server_send(const char *json)
     int fd = s_client;
     if (!s_server || fd < 0) return;
     size_t len = strlen(json);
+    if (fd == SERIAL_FD) {
+        uart_write_bytes(SERIAL_UART, json, len);
+        uart_write_bytes(SERIAL_UART, "\n", 1);
+        return;
+    }
     send_job_t *job = malloc(sizeof(send_job_t) + len + 1);
     if (!job) return;
     job->fd = fd;
@@ -834,9 +912,87 @@ void hub_server_send(const char *json)
     }
 }
 
+const char *hub_server_link(void)
+{
+    if (!hub_server_pc_online()) return "yok";
+    return s_client == SERIAL_FD ? "USB" : "Wi-Fi";
+}
+
 bool hub_server_pc_online(void)
 {
     return s_client >= 0 && (uint32_t)(now_ms() - s_last_rx_ms) < ONLINE_TIMEOUT_MS;
+}
+
+static void send_diag(void)
+{
+    int rssi, channel, reason, last, avg, loss, samples;
+    uint32_t disconnects;
+    net_diag(&rssi, &channel, &disconnects, &reason);
+    net_ping_stats(&last, &avg, &loss, &samples);
+    char buf[260];
+    snprintf(buf, sizeof(buf),
+             "{\"type\":\"diag\",\"rssi\":%d,\"ch\":%d,\"disc\":%lu,\"reason\":%d,\"wifi\":%d,\"gw_ms\":%d,"
+             "\"gw_avg\":%d,\"gw_loss\":%d,\"reset\":%d,\"up\":%lu,\"heap_int\":%u,\"heap_min\":%u}",
+             rssi, channel, (unsigned long)disconnects, reason, net_connected() ? 1 : 0, last, avg, loss,
+             (int)esp_reset_reason(),
+             (unsigned long)(now_ms() / 1000), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+    hub_server_send(buf);
+}
+
+static void serial_task(void *arg)
+{
+    char *line = heap_caps_malloc(SERIAL_LINE_MAX + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!line) {
+        vTaskDelete(NULL);
+        return;
+    }
+    uint8_t chunk[256];
+    size_t len = 0;
+    bool overflow = false;
+    uint32_t last_diag = 0;
+    for (;;) {
+        uint32_t t = now_ms();
+        if (t - last_diag >= 5000) {
+            last_diag = t;
+            send_diag();
+        }
+        int n = uart_read_bytes(SERIAL_UART, chunk, sizeof(chunk), pdMS_TO_TICKS(100));
+        for (int i = 0; i < n; i++) {
+            char c = (char)chunk[i];
+            if (c == '\n') {
+                if (!overflow && len > 0) {
+                    line[len] = 0;
+                    on_text(SERIAL_FD, line);
+                }
+                len = 0;
+                overflow = false;
+            } else if (c != '\r') {
+                if (len < SERIAL_LINE_MAX) line[len++] = c;
+                else overflow = true;
+            }
+        }
+    }
+}
+
+static void serial_start(void)
+{
+    const uart_config_t cfg = {
+        .baud_rate = SERIAL_BAUD,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+    if (uart_driver_install(SERIAL_UART, 16384, 8192, 0, NULL, 0) != ESP_OK) {
+        ESP_LOGE(TAG, "serial link: uart install failed");
+        return;
+    }
+    uart_param_config(SERIAL_UART, &cfg);
+    uart_set_pin(SERIAL_UART, 43, 44, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    xTaskCreate(serial_task, "serial", 8192, NULL, 5, NULL);
+    ESP_LOGI(TAG, "serial link on UART0 at %d baud", SERIAL_BAUD);
 }
 
 void hub_server_start(void)
@@ -864,4 +1020,5 @@ void hub_server_start(void)
     httpd_register_uri_handler(s_server, &perf);
     ota_register(s_server);
     ESP_LOGI(TAG, "listening on :80");
+    serial_start();
 }

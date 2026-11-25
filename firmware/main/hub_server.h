@@ -10,3 +10,5 @@ bool hub_server_pc_online(void);
 
 // Queue a JSON text frame for the companion. Safe from any task.
 void hub_server_send(const char *json);
+
+const char *hub_server_link(void);

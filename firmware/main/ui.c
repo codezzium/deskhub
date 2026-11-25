@@ -755,6 +755,7 @@ static void tick_cb(lv_timer_t *t)
         home_refresh_media();
         home_refresh_stats();
         stats_refresh();
+        dash_refresh();
         claude_refresh();
         calendar_refresh(true);
         games_refresh();
@@ -860,6 +861,7 @@ void ui_init(void)
         s_pages[i] = p;
         creators[i](p);
     }
+    dash_create(scr);
     load_layout();
     load_order();
     apply_layout();
@@ -872,6 +874,8 @@ void ui_set_stats(const hub_stats_t *s)
 {
     g_stats = *s;
     stats_refresh();
+    dash_mark_data();
+    dash_refresh();
     home_refresh_stats();
     net_refresh_live();
 }
@@ -964,6 +968,7 @@ void ui_set_claude(const hub_claude_t *c)
     if (agent_changed && s_nav_logo) lv_image_set_src(s_nav_logo, ui_agent_logo(32));
     claude_refresh();
     home_refresh_claude();
+    dash_refresh();
 }
 
 void ui_set_weather(const hub_weather_t *w)

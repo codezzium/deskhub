@@ -10,6 +10,12 @@
 #define CELL_W 72
 #define DAY_W ((CONTENT_W - 32) / HUB_DAYS)
 
+#if CONFIG_HUB_FAHRENHEIT
+#define WIND_UNIT "mph"
+#else
+#define WIND_UNIT "km/h"
+#endif
+
 static lv_obj_t *s_icon, *s_temp, *s_cond, *s_city, *s_details, *s_updated;
 static lv_obj_t *s_h_time[HUB_HOURS], *s_h_icon[HUB_HOURS], *s_h_temp[HUB_HOURS], *s_h_rain[HUB_HOURS];
 static lv_obj_t *s_d_name[HUB_DAYS], *s_d_icon[HUB_DAYS], *s_d_range[HUB_DAYS], *s_d_rain[HUB_DAYS];
@@ -95,7 +101,7 @@ void weather_page_refresh(void)
 
     ui_fmt_temp(a, sizeof(a), w->feels);
     snprintf(buf, sizeof(buf), "Feels like %s\nHumidity %d%%\nWind %d %s", a, w->humidity, (int)(w->wind + 0.5f),
-             CONFIG_HUB_FAHRENHEIT ? "mph" : "km/h");
+             WIND_UNIT);
     lv_label_set_text(s_details, buf);
     ui_fmt_clock(a, sizeof(a), w->fetched);
     snprintf(buf, sizeof(buf), "Updated %s", a);

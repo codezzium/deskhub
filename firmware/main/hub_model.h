@@ -19,6 +19,15 @@ typedef struct {
     float net_down;     // KB/s
     float net_up;
     float disk;         // % used of the system drive
+    float disk_read;
+    float disk_write;
+    float disk_temp;
+    bool has_gpu2;
+    float gpu2;
+    float gpu2_temp;
+    float vram2_used;
+    float vram2_total;
+    char gpu2_name[48];
     char cpu_name[48];
     char gpu_name[48];
 } hub_stats_t;
@@ -69,6 +78,7 @@ typedef struct {
 
 #define HUB_CLAUDE_DAYS 7
 #define HUB_CLAUDE_MODELS 4
+#define HUB_CLAUDE_WEEKLY 3
 typedef struct {
     bool valid;
     char provider[12];   // "claude" or "codex"
@@ -88,6 +98,10 @@ typedef struct {
     int model_count;
     char model_name[HUB_CLAUDE_MODELS][16];
     double model_tokens[HUB_CLAUDE_MODELS];
+    int weekly_count;
+    char weekly_name[HUB_CLAUDE_WEEKLY][16];
+    float weekly_pct[HUB_CLAUDE_WEEKLY];
+    time_t weekly_reset[HUB_CLAUDE_WEEKLY];
 } hub_claude_t;
 
 #define HUB_MAX_PRINTERS 4

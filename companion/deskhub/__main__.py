@@ -26,6 +26,7 @@ from .netstats import NetStats
 from .pages import enabled_pages, home_grid, home_message, layout_message, pc_sleep_mode
 from .pc_power import PowerWatch
 from .printer import PrinterService
+from .serial_link import SerialLink, find_hub_port
 from .shortcuts import hub_view, lit_message, load_tiles, run_tile
 from .stats import Stats
 from .custom_games import CustomGames, load_games
@@ -108,6 +109,7 @@ class Companion:
         hub = cfg.get("hub", {})
         self.host = hub.get("host", "deskhub.local")
         self.url = f"ws://{self.host}/ws"
+        self.serial_port = str(hub.get("serial", "")).strip()
         self.on_status = None   # (connected, detail) -> None, e.g. the tray icon
         self.token = hub.get("token", "")
         self.stats = Stats()
@@ -210,7 +212,7 @@ class Companion:
     async def stats_loop(self):
         while True:
             await self.send(self.stats.sample())
-            await asyncio.sleep(1)
+            await asyncio.sleep(2)
 
     async def media_loop(self):
         await self.media.start()
@@ -396,6 +398,8 @@ class Companion:
                 self.alerts.dismiss(sid)
             elif action == "focus":
                 await asyncio.to_thread(self.alerts.focus, sid)
+        elif kind == "diag":
+            log.info("hub diag %s", {k: v for k, v in msg.items() if k != "type"})
         elif kind == "speedtest" and self.net:
             asyncio.create_task(self.speedtest())
         elif kind == "steam_launch" and self.steam:
@@ -416,8 +420,22 @@ class Companion:
                     log.warning("shortcut %d failed: %s", i, e)
 
     async def session(self):
+        for attempt in range(3):
+            port = find_hub_port(self.serial_port)
+            if not port:
+                break
+            try:
+                await self.serial_session(port)
+                return
+            except (OSError, asyncio.TimeoutError) as e:
+                log.info("hub not reachable over %s (%s)", port, e)
+                await asyncio.sleep(2)
+        if self.serial_port:
+            log.info("no USB link to the hub, trying Wi-Fi")
         async with websockets.connect(self.url, max_size=2**20, ping_interval=10,
                                       ping_timeout=10, open_timeout=10) as ws:
+            if self.serial_port:
+                asyncio.create_task(self.watch_usb(ws))
             await ws.send(json.dumps({"type": "hello", "token": self.token}))
             reply = json.loads(await asyncio.wait_for(ws.recv(), 10))
             if reply.get("type") != "hello_ok":
@@ -427,42 +445,90 @@ class Companion:
             peer = ws.remote_address[0] if ws.remote_address else ""
             self.status(True, f"connected to {self.host}" + (f" ({peer})" if peer else ""))
             self.ws = ws
-            # Everything the hub keeps in RAM, resent after each (re)connect.
-            await self.send(layout_message(self.cfg))
-            await self.send({"type": "pc_power", "asleep": self.pc_asleep})
-            await self.send(home_message(self.cfg))
-            await self.send(hub_view(self.tiles))
-            if self.lit_msg:
-                await self.send(self.lit_msg)
-            await self.send(self.events_message())
-            if self.claude_msg:
-                await self.send(self.claude_msg)
-            if self.alerts and self.alerts.msg:
-                await self.send(self.alerts.msg)
-            if self.printer_msg:
-                await self.send(self.printer_msg)
-            if self.net_msg:
-                await self.send(self.net_msg)
-            if self.github and self.github.msg:
-                await self.send(self.github.msg)
-            if self.steam_msg and self.steam:
-                await self.send(self.steam_msg)
-                for frame in await asyncio.to_thread(self.steam.all_frames):
-                    await self.send(frame)
-            if self.servers:
-                if self.servers.current_art():
-                    await self.send(self.servers.current_art())
-                await self.send(self.servers.message())
-            else:
-                await self.send({"type": "media_server", "configured": False})
-            art = self.media.current_art()
-            if art:
-                await self.send(art)
+            await self.resend_state()
             async for raw in ws:
                 try:
                     await self.handle(raw)
                 except Exception as e:
                     log.warning("bad message from hub: %s", e)
+
+    async def watch_usb(self, ws):
+        while True:
+            await asyncio.sleep(30)
+            if self.ws is not ws:
+                return
+            if await asyncio.to_thread(find_hub_port, self.serial_port):
+                log.info("hub found on USB, leaving Wi-Fi")
+                await ws.close()
+                return
+
+    async def serial_session(self, port: str):
+        link = await asyncio.to_thread(SerialLink, port, asyncio.get_running_loop())
+        try:
+            await link.send(json.dumps({"type": "hello", "token": self.token}))
+            reply = await asyncio.wait_for(self.serial_hello(link), 10)
+            log.info("connected to hub over %s (firmware %s)", port, reply.get("version", "?"))
+            self.connected_once = True
+            self.status(True, f"connected over {port}")
+            self.ws = link
+            await self.resend_state()
+            while True:
+                raw = await link.recv()
+                try:
+                    kind = json.loads(raw).get("type")
+                except ValueError:
+                    continue
+                if kind == "hello_needed":
+                    raise ConnectionError("hub restarted")
+                try:
+                    await self.handle(raw)
+                except Exception as e:
+                    log.warning("bad message from hub: %s", e)
+        finally:
+            link.close()
+
+    @staticmethod
+    async def serial_hello(link: SerialLink) -> dict:
+        while True:
+            try:
+                reply = json.loads(await link.recv())
+            except ValueError:
+                continue
+            if reply.get("type") == "hello_ok":
+                return reply
+
+    async def resend_state(self):
+        # Everything the hub keeps in RAM, resent after each (re)connect.
+        await self.send(layout_message(self.cfg))
+        await self.send({"type": "pc_power", "asleep": self.pc_asleep})
+        await self.send(home_message(self.cfg))
+        await self.send(hub_view(self.tiles))
+        if self.lit_msg:
+            await self.send(self.lit_msg)
+        await self.send(self.events_message())
+        if self.claude_msg:
+            await self.send(self.claude_msg)
+        if self.alerts and self.alerts.msg:
+            await self.send(self.alerts.msg)
+        if self.printer_msg:
+            await self.send(self.printer_msg)
+        if self.net_msg:
+            await self.send(self.net_msg)
+        if self.github and self.github.msg:
+            await self.send(self.github.msg)
+        if self.steam_msg and self.steam:
+            await self.send(self.steam_msg)
+            for frame in await asyncio.to_thread(self.steam.all_frames):
+                await self.send(frame)
+        if self.servers:
+            if self.servers.current_art():
+                await self.send(self.servers.current_art())
+            await self.send(self.servers.message())
+        else:
+            await self.send({"type": "media_server", "configured": False})
+        art = self.media.current_art()
+        if art:
+            await self.send(art)
 
     async def run(self):
         self.loop = asyncio.get_running_loop()

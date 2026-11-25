@@ -125,6 +125,9 @@ void home_refresh_events(void);
 
 void stats_create(lv_obj_t *page);
 void stats_refresh(void);
+void dash_create(lv_obj_t *scr);
+void dash_refresh(void);
+void dash_mark_data(void);
 
 void media_create(lv_obj_t *page);
 void media_refresh(void);

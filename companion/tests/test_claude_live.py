@@ -72,4 +72,16 @@ with tempfile.TemporaryDirectory() as d:
 
 check(claude_live.renew_signin(None) is False, "no claude CLI: nothing to run")
 
+weekly = claude_live.weekly_limits([
+    {"kind": "weekly_all", "group": "weekly", "percent": 14, "resets_at": "2099-01-01T00:00:00+00:00",
+     "scope": None},
+    {"kind": "weekly_scoped", "group": "weekly", "percent": 0, "resets_at": "2099-01-01T00:00:00+00:00",
+     "scope": {"model": {"id": None, "display_name": "Fable"}, "surface": None}},
+    {"kind": "weekly_all", "group": "weekly", "percent": 50, "resets_at": "2000-01-01T00:00:00+00:00"},
+    {"kind": "session", "group": "five_hour", "percent": 9, "resets_at": "2099-01-01T00:00:00+00:00"},
+], time.time())
+check([(w["name"], w["pct"]) for w in weekly] == [("HAFTALIK", 14.0), ("FABLE", 0.0)],
+      f"weekly limits from the limits list: {weekly}")
+check(claude_live.weekly_limits(None, time.time()) == [], "no limits list: nothing")
+
 print("\nPROBLEMS:" if problems else "\nOK", problems if problems else "")
