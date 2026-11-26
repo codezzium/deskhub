@@ -127,6 +127,12 @@ static bool data_fresh(void)
     return s_have_data && lv_tick_elaps(s_last_data) < STALE_MS;
 }
 
+bool dash_pc_gone(void)
+{
+    if (s_have_data) return lv_tick_elaps(s_last_data) >= STALE_MS;
+    return lv_tick_get() >= STALE_MS;
+}
+
 void dash_mark_data(void)
 {
     s_last_data = lv_tick_get();

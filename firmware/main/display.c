@@ -142,6 +142,7 @@ static bool night_now(void)
 
 static int dark_mode(void)
 {
+    if (dash_pc_gone()) return PC_SLEEP_OFF;
     if (s_pc_asleep && s_pc_mode != PC_SLEEP_NONE) return s_pc_mode;
     if (night_now()) return s_night_mode;
     return PC_SLEEP_NONE;

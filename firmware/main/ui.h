@@ -8,6 +8,7 @@
 void ui_init(void);
 
 void ui_set_stats(const hub_stats_t *s);
+bool dash_pc_gone(void);
 void ui_set_media(const hub_media_t *m);
 void ui_set_art(uint32_t id, uint16_t w, uint16_t h, const uint8_t *rgb565);
 // Plex / Jellyfin section of the Media page, and its poster (separate from the PC's cover).

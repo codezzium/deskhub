@@ -595,6 +595,8 @@ static void on_wifi_test(const cJSON *m)
         lv_display_enable_invalidation(NULL, cJSON_IsTrue(render));
         display_unlock();
     }
+    const cJSON *bl = cJSON_GetObjectItemCaseSensitive(m, "bl");
+    if (cJSON_IsBool(bl)) board_backlight(cJSON_IsTrue(bl));
     const cJSON *bssid = cJSON_GetObjectItemCaseSensitive(m, "bssid");
     if (cJSON_IsString(bssid) && bssid->valuestring) {
         unsigned b[6];
